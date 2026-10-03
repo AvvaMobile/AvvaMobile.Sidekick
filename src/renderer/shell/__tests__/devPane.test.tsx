@@ -1,0 +1,236 @@
+// @vitest-environment happy-dom
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WorkspaceView } from '../../../shared/state';
+
+vi.mock('../terminals', () => ({ ensureTerminal: vi.fn(), showTerminal: vi.fn(), fitTerminal: vi.fn(), terminalData: vi.fn(), disposeTerminal: vi.fn() }));
+
+const { DevPane } = await import('../components/DevPane');
+const { sendState } = await import('../viewModel');
+const { TabBar } = await import('../components/TabBar');
+const { StartPage } = await import('../components/StartPage');
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
+
+function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
+  return {
+    id,
+    name: `P ${id}`,
+    projectPath: `/Users/x/${id}`,
+    color: '#123',
+    initial: 'P',
+    iconUrl: null,
+    claudeSessionId: null,
+    model: 'opus',
+    splitRatio: 0.6,
+    attention: 'none',
+    chatgpt: { generating: false, loggedIn: true },
+    candidate: null,
+    sending: false,
+    task: null,
+    terminal: { running: true, error: null },
+    autoSend: null,
+    ...over,
+  };
+}
+
+const DIAG_LABELS = ['Page state', 'Capture Claude Prompt', 'Latest user msg', 'Mic status', 'Home', 'Insert into composer', 'Submit'];
+
+const actions = () => ({
+  sendToClaude: vi.fn(),
+  cancelAutoSend: vi.fn(),
+  cancelTask: vi.fn(),
+  resetSession: vi.fn(),
+  sendReview: vi.fn(),
+  restartTerminal: vi.fn(),
+  setModel: vi.fn(),
+  clearTerminal: vi.fn(),
+  copyTerminal: vi.fn(),
+});
+const diag = { state: vi.fn(), capture: vi.fn(), latestUser: vi.fn(), micStatus: vi.fn(), home: vi.fn(), submit: vi.fn(), insert: vi.fn() };
+
+describe('development pane UI', () => {
+  let root: Root;
+  let host: HTMLDivElement;
+  beforeEach(() => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    host.remove();
+  });
+
+  const render = (list: WorkspaceView[], activeId: string, debugMode = false, a = actions()) => {
+    act(() => root.render(<DevPane workspaces={list} active={list.find((w) => w.id === activeId)!} debugMode={debugMode} actions={a} diagnostics={diag} />));
+    return a;
+  };
+  const buttonLabels = () => Array.from(host.querySelectorAll('button')).map((b) => b.textContent?.trim());
+
+  it('shows the active model and switches to another one', () => {
+    const a = render([ws('a', { model: 'opus' })], 'a');
+    const btn = (name: string) => Array.from(host.querySelectorAll('.model-seg button')).find((b) => b.textContent === name) as HTMLButtonElement;
+    expect(btn('Opus').classList.contains('on')).toBe(true);
+    expect(btn('Sonnet').classList.contains('on')).toBe(false);
+    act(() => btn('Fable').click());
+    expect(a.setModel).toHaveBeenCalledWith('a', 'fable');
+    act(() => btn('Opus').click());
+    expect(a.setModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('Clear runs /clear for the active Workspace', () => {
+    const a = render([ws('a')], 'a');
+    act(() => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Clear') as HTMLButtonElement).click());
+    expect(a.clearTerminal).toHaveBeenCalledWith('a');
+  });
+
+  it('Copy runs /copy for the active Workspace', () => {
+    const a = render([ws('a')], 'a');
+    act(() => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Copy') as HTMLButtonElement).click());
+    expect(a.copyTerminal).toHaveBeenCalledWith('a');
+  });
+
+  it('debug controls are hidden in normal mode', () => {
+    render([ws('a')], 'a', false);
+    for (const l of DIAG_LABELS) expect(buttonLabels()).not.toContain(l);
+    expect(host.querySelector('[data-testid="diagnostics"]')).toBeNull();
+    expect(buttonLabels()).not.toContain('Diagnostics');
+  });
+
+  it('debug controls are reachable only when Developer → Diagnostics is on', () => {
+    render([ws('a')], 'a', true);
+    const tab = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Diagnostics')!;
+    act(() => tab.click());
+    expect(host.querySelector('[data-testid="diagnostics"]')).not.toBeNull();
+    expect(buttonLabels()).toContain('Capture Claude Prompt');
+  });
+
+  it('the terminal is the pane (no preview dialog)', () => {
+    render([ws('a', { candidate: { text: 'do it', messageId: 'm', alreadySent: false } })], 'a');
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(buttonLabels().some((l) => l?.startsWith('Run in Claude'))).toBe(false);
+    expect((host.querySelector('.terminal-wrap') as HTMLElement).style.display).toBe('flex');
+    expect(buttonLabels()).not.toContain('Claude');
+  });
+
+  it('shows a live auto-send countdown with Cancel', () => {
+    vi.useFakeTimers();
+    try {
+      const at = new Date(Date.now() + 3_000).toISOString();
+      const a = render([ws('a', { autoSend: { at } })], 'a');
+      const bar = () => host.querySelector('.auto-send-bar');
+      expect(bar()?.textContent).toContain('Sending to Claude in 3 s');
+      expect(bar()?.textContent).toContain('you asked ChatGPT to send it');
+      act(() => {
+        vi.advanceTimersByTime(1_100);
+      });
+      expect(bar()?.textContent).toContain('Sending to Claude in 2 s');
+      act(() => (Array.from(bar()!.querySelectorAll('button')).find((b) => b.textContent === 'Cancel') as HTMLButtonElement).click());
+      expect(a.cancelAutoSend).toHaveBeenCalledWith('a');
+      render([ws('a')], 'a', false, a);
+      expect(bar()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('review handback is offered as an explicit action, never automatic', () => {
+    const task = {
+      id: 't1',
+      status: 'review_pending' as const,
+      outcome: 'succeeded' as const,
+      prompt: 'p',
+      createdAt: '',
+      error: null,
+      review: { status: 'pending' as const, lastError: null, body: 'packet' },
+    };
+    const a = render([ws('a', { task })], 'a');
+    expect(a.sendReview).not.toHaveBeenCalled();
+    const btn = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Send to ChatGPT for review')!;
+    act(() => btn.click());
+    expect(a.sendReview).toHaveBeenCalledWith('a', 't1');
+  });
+});
+
+describe('workspace tabs', () => {
+  it('shows the custom icon image instead of the color dot, and opens the context menu on right-click', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const onContextMenu = vi.fn();
+    const onClose = vi.fn();
+    const list = [ws('a', { iconUrl: 'data:image/png;base64,AAAA' }), ws('b')];
+    act(() => root.render(<TabBar workspaces={list} activeId="a" onSelect={vi.fn()} onReorder={vi.fn()} onContextMenu={onContextMenu} onNew={vi.fn()} onClose={onClose} startOpen={false} onSelectStart={vi.fn()} onCloseStart={vi.fn()} />));
+    const [a, b] = Array.from(host.querySelectorAll('.tab'));
+    expect(a!.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AAAA');
+    expect(a!.querySelector('.tab-dot')).toBeNull();
+    expect(a!.classList.contains('active')).toBe(true);
+    expect(b!.querySelector('.tab-name')?.textContent).toBe('P b');
+    act(() => {
+      b!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    });
+    expect(onContextMenu).toHaveBeenCalledWith('b');
+    act(() => (b!.querySelector('.tab-close') as HTMLElement).click());
+    expect(onClose).toHaveBeenCalledWith('b');
+    act(() => root.unmount());
+    host.remove();
+  });
+});
+
+describe('Projects start page', () => {
+  const mount = (projects: { id: string; name: string; projectPath: string; open: boolean }[]) => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const h = { onCreate: vi.fn(), onOpen: vi.fn(), onContextMenu: vi.fn() };
+    act(() => root.render(<StartPage projects={projects} {...h} />));
+    return { host, root, ...h };
+  };
+  const list = [
+    { id: 'a', name: 'AcmeShop', projectPath: '/Users/x/Documents/Projects/AcmeShop', open: true },
+    { id: 'b', name: 'RideShare', projectPath: '/Users/x/Documents/Projects/RideShare', open: false },
+  ];
+
+  it('lists projects with bold name and directory, filters by name, opens on click and offers the context menu', () => {
+    const { host, root, onOpen, onContextMenu, onCreate } = mount(list);
+    expect(host.querySelector('h1')?.textContent).toBe('Projects');
+    const rows = () => Array.from(host.querySelectorAll('.start-row'));
+    expect(rows()).toHaveLength(2);
+    expect(rows()[0]!.querySelector('b')?.textContent).toBe('AcmeShop');
+    expect(rows()[0]!.querySelector('.start-path')?.textContent).toContain('Projects/AcmeShop');
+    const input = host.querySelector('input') as HTMLInputElement;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'RID');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(rows().map((r) => r.querySelector('b')?.textContent)).toEqual(['RideShare']);
+    act(() => (rows()[0] as HTMLElement).click());
+    expect(onOpen).toHaveBeenCalledWith('b');
+    act(() => {
+      rows()[0]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    });
+    expect(onContextMenu).toHaveBeenCalledWith('b');
+    act(() => (Array.from(host.querySelectorAll('button')).find((x) => x.textContent?.includes('Create')) as HTMLElement).click());
+    expect(onCreate).toHaveBeenCalled();
+    act(() => root.unmount());
+    host.remove();
+  });
+});
+
+describe('sendState', () => {
+  it('disabled while running, generating or without candidate', () => {
+    const cand = { text: 'x', messageId: null, alreadySent: false };
+    expect(sendState(null).enabled).toBe(false);
+    expect(sendState(ws('a')).enabled).toBe(false);
+    expect(sendState(ws('a', { candidate: cand })).enabled).toBe(true);
+    expect(sendState(ws('a', { candidate: cand, chatgpt: { generating: true, loggedIn: true } })).enabled).toBe(false);
+    const running = { id: 't', status: 'running' as const, outcome: null, prompt: '', createdAt: '', error: null, review: null };
+    expect(sendState(ws('a', { candidate: cand, task: running })).enabled).toBe(false);
+  });
+});

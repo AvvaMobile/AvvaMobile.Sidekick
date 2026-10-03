@@ -1,0 +1,73 @@
+# Packaging and release (D036). Local: `npm run dist:mac` / `npm run dist:win`.
+# CI: .github/workflows/release.yml builds both on a `vX.Y.Z` tag. See docs/RELEASING.md.
+appId: com.avvamobile.sidekick
+productName: Avva Mobile Sidekick
+copyright: Copyright © 2026 Avva Mobile
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+# node-pty loads its native module and spawn-helper/conpty from disk; they cannot live inside app.asar.
+asarUnpack:
+  - node_modules/node-pty/**
+# node-pty ships N-API prebuilds for every platform/arch we build; no compiler needed.
+npmRebuild: false
+# Electron fuses: the packaged app cannot be turned into a Node runtime or debugger target, and only runs
+# its own integrity-checked app.asar. Cookie encryption stays off: unsigned builds would trigger keychain
+# prompts and existing ChatGPT logins would be lost.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  # Stays on: without it file:// cannot read the shell pages inside app.asar (ERR_FILE_NOT_FOUND); turning
+  # it off needs the renderer served from a custom protocol instead of loadFile.
+  grantFileProtocolExtraPrivileges: true
+  # Flipping fuses breaks the arm64 ad-hoc signature; unsigned builds would be killed at launch otherwise
+  # (signed builds are signed again right after).
+  resetAdHocDarwinSignature: true
+publish:
+  # Updates are served from this (public) repository's GitHub Releases. CI creates a draft release,
+  # both platforms upload into it, then it is published.
+  provider: github
+  owner: AvvaMobile
+  repo: AvvaMobile.Sidekick
+  releaseType: draft
+
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip # electron-updater installs from the zip
+      arch: [arm64, x64]
+  # No spaces: the zip and its .blockmap must keep matching names on GitHub (differential updates).
+  artifactName: Avva-Mobile-Sidekick-${version}-${arch}-mac.${ext}
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Signing identity comes from CSC_LINK/CSC_KEY_PASSWORD (or the keychain); notarization runs when
+  # APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER are set.
+  extendInfo:
+    NSMicrophoneUsageDescription: Avva Mobile Sidekick uses the microphone for ChatGPT voice conversations.
+dmg:
+  artifactName: Avva-Mobile-Sidekick-${version}-${arch}.${ext}
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: Avva-Mobile-Sidekick-Setup-${version}.${ext}
+  # Unsigned for now: SmartScreen shows "unknown publisher". Set WIN_CSC_LINK/WIN_CSC_KEY_PASSWORD to sign.
+nsis:
+  oneClick: true
+  perMachine: false
+  shortcutName: Avva Mobile Sidekick
+  uninstallDisplayName: Avva Mobile Sidekick

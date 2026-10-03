@@ -1,0 +1,90 @@
+name: Release
+
+# Push a `vX.Y.Z` tag (matching package.json's version) to build macOS and Windows installers and
+# publish them as a GitHub Release of this repository (the auto-update feed). See docs/RELEASING.md.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check the tag matches package.json
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft --title "$GITHUB_REF_NAME" --generate-notes
+
+  build:
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    env:
+      HAS_APPLE_KEY: ${{ secrets.APPLE_API_KEY_P8 != '' }}
+      HAS_MAC_CERT: ${{ secrets.MAC_CSC_LINK != '' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: runner.os != 'macOS' || env.HAS_MAC_CERT == 'true'
+        run: npm ci
+      - if: runner.os != 'macOS' || env.HAS_MAC_CERT == 'true'
+        run: npm run typecheck
+      - if: runner.os != 'macOS' || env.HAS_MAC_CERT == 'true'
+        run: npm test
+      # Secrets reach the build only as step environment variables (never interpolated into scripts).
+      - name: Write App Store Connect API key
+        if: runner.os == 'macOS' && env.HAS_APPLE_KEY == 'true'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          mkdir -p ~/private_keys
+          printf '%s\n' "$APPLE_API_KEY_P8" > ~/private_keys/AuthKey.p8
+          echo "APPLE_API_KEY=$HOME/private_keys/AuthKey.p8" >> "$GITHUB_ENV"
+      # Without the Developer ID secret, macOS is built and signed locally instead (docs/RELEASING.md).
+      - name: Build and upload
+        if: runner.os != 'macOS' || env.HAS_MAC_CERT == 'true'
+        shell: bash
+        # electron-builder treats an empty CSC_LINK as a path (the working directory): drop empty values.
+        run: |
+          for v in CSC_LINK CSC_KEY_PASSWORD CSC_IDENTITY_AUTO_DISCOVERY APPLE_API_KEY_ID APPLE_API_ISSUER WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
+            [ -n "${!v}" ] || unset "$v"
+          done
+          npm run release -- ${{ runner.os == 'macOS' && '--mac' || '--win' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # macOS Developer ID signing; without the certificate secret the build is unsigned.
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          # Notarization (together with APPLE_API_KEY written above).
+          APPLE_API_KEY_ID: ${{ (runner.os == 'macOS' && env.HAS_APPLE_KEY == 'true') && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ (runner.os == 'macOS' && env.HAS_APPLE_KEY == 'true') && secrets.APPLE_API_ISSUER || '' }}
+          # Windows signing (optional; unsigned when empty).
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest
