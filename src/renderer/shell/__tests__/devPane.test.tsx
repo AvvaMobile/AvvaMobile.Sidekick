@@ -163,7 +163,7 @@ describe('development pane UI', () => {
     }
   });
 
-  it('review handback is offered as an explicit action, never automatic', () => {
+  it('shows no review bar in the pane (review handback lives on the relay button)', () => {
     const task = {
       id: 't1',
       status: 'review_pending' as const,
@@ -175,9 +175,9 @@ describe('development pane UI', () => {
     };
     const a = render([ws('a', { task })], 'a');
     expect(a.sendReview).not.toHaveBeenCalled();
-    const btn = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Send to ChatGPT for review')!;
-    act(() => btn.click());
-    expect(a.sendReview).toHaveBeenCalledWith('a', 't1');
+    expect(host.querySelector('.review-bar')).toBeNull();
+    expect(buttonLabels()).not.toContain('Send to ChatGPT for review');
+    expect(buttonLabels()).not.toContain('Not now');
   });
 });
 

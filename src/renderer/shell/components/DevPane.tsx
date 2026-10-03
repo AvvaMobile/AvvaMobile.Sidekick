@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { EFFORT_CHOICES, EFFORT_LABELS, isEffortChoice, MODEL_CHOICES, type EffortChoice, type ModelChoice } from '../../../shared/models';
 import type { WorkspaceView } from '../../../shared/state';
-import { needsReviewDecision, shortPath } from '../viewModel';
+import { shortPath } from '../viewModel';
 import { DiagnosticsPanel, type DiagnosticsApi } from './DiagnosticsPanel';
 import { TerminalHost } from './TerminalHost';
 
@@ -37,24 +37,16 @@ interface Props {
 export function DevPane({ workspaces, active, debugMode, actions, diagnostics }: Props) {
   const [showDiag, setShowDiag] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [hiddenReview, setHiddenReview] = useState<string | null>(null);
   useEffect(() => {
     if (!debugMode) setShowDiag(false);
   }, [debugMode]);
 
   const running = active?.task?.status === 'running' || active?.task?.status === 'queued';
-  const review = needsReviewDecision(active) && active!.task!.id !== hiddenReview ? active!.task! : null;
-  const pendingReviewHidden = needsReviewDecision(active) && active!.task!.id === hiddenReview;
 
   return (
     <section className="devpane" aria-label="Development pane">
       <header className="devpane-header">
         <div className="header-right">
-          {pendingReviewHidden && (
-            <button className="chip review-chip" onClick={() => setHiddenReview(null)}>
-              Review pending
-            </button>
-          )}
           <button
             className="btn"
             disabled={!active || running || !(active?.terminal.running ?? false)}
@@ -149,21 +141,6 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
       )}
 
       {active?.autoSend && <AutoSendBar at={active.autoSend.at} onCancel={() => actions.cancelAutoSend(active.id)} />}
-
-      {review && active && (
-        <div className={`review-bar ${review.outcome === 'succeeded' ? '' : 'bad'}`}>
-          <span className="review-title">
-            {review.outcome === 'succeeded' ? 'Claude finished.' : `Claude ${review.outcome}.`}
-            {review.review?.status === 'failed' && <span className="review-error"> {review.review.lastError}</span>}
-          </span>
-          <button className="btn primary small" disabled={review.review?.status === 'sending'} onClick={() => actions.sendReview(active.id, review.id)}>
-            {review.review?.status === 'sending' ? 'Sending…' : review.review?.status === 'failed' ? 'Retry review' : 'Send to ChatGPT for review'}
-          </button>
-          <button className="btn ghost small" onClick={() => setHiddenReview(review.id)}>
-            Not now
-          </button>
-        </div>
-      )}
 
       <div className="devpane-body">
         <TerminalHost

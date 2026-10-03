@@ -96,7 +96,6 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .btn.send { padding: 5px 14px; }
 
 .chip { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--pane-2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
-.review-chip { cursor: pointer; color: var(--info); border-color: #24476e; }
 
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .seg button { border: none; background: transparent; color: var(--muted); padding: 6px 14px; font-size: 13px; cursor: pointer; }
@@ -112,9 +111,7 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 
 /* Review */
 .review-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #24476e; background: #131b26; font-size: 12.5px; }
-.review-bar.bad { border-bottom-color: #6a2a27; background: #221413; }
 .review-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.review-error { color: var(--err); font-weight: 400; }
 .auto-send-why { font-weight: 400; opacity: 0.75; }
 
 /* Terminal */

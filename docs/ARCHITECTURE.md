@@ -132,7 +132,7 @@ PTY output and keystrokes never change task state; only hook events do.
 | Shell UI | `src/renderer/shell/*` (React); relay overlay `src/renderer/relay/*` |
 | Updates, setup check | `src/main/app/updater.ts`, `src/main/app/setupCheck.ts` |
 
-The right-hand pane is the Workspace's terminal running Claude (xterm.js on node-pty). Its header has **Clear** (`/clear`), **Copy** (`/copy`), the model switch, **Stop** while a task runs, and **⋯** (*New Claude session*). A sub-header shows the project path and Claude session. The relay buttons sit on the divider, not in the header; the auto-send countdown and review bar are shown in the pane.
+The right-hand pane is the Workspace's terminal running Claude (xterm.js on node-pty). Its header has **Clear** (`/clear`), **Copy** (`/copy`), the model switch, the effort level, **Stop** while a task runs, and **⋯** (*New Claude session*). A sub-header shows the project path and Claude session. The relay buttons sit on the divider, not in the header; only the auto-send countdown is shown in the pane (review handback is the relay button).
 
 Managed activity is not rendered into the terminal: only Claude itself writes there (rendering into it would corrupt Claude's screen).
 
