@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isModelChoice, parseDefaultModel } from '../models';
+import { isEffortChoice, isModelChoice, parseDefaultModel } from '../models';
 
 describe('models', () => {
   it('reads the default model from settings.json', () => {
@@ -13,5 +13,8 @@ describe('models', () => {
   it('validates choices', () => {
     expect(isModelChoice('fable')).toBe(true);
     expect(isModelChoice('gpt')).toBe(false);
+    expect(isEffortChoice('xhigh')).toBe(true);
+    expect(isEffortChoice('extreme')).toBe(false);
+    expect(isEffortChoice(null)).toBe(false);
   });
 });

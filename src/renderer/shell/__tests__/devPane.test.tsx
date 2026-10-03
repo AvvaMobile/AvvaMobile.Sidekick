@@ -27,6 +27,7 @@ function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
     iconUrl: null,
     claudeSessionId: null,
     model: 'opus',
+    effort: null,
     splitRatio: 0.6,
     attention: 'none',
     chatgpt: { generating: false, loggedIn: true },
@@ -49,6 +50,7 @@ const actions = () => ({
   sendReview: vi.fn(),
   restartTerminal: vi.fn(),
   setModel: vi.fn(),
+  setEffort: vi.fn(),
   clearTerminal: vi.fn(),
   copyTerminal: vi.fn(),
 });
@@ -82,6 +84,27 @@ describe('development pane UI', () => {
     expect(a.setModel).toHaveBeenCalledWith('a', 'fable');
     act(() => btn('Opus').click());
     expect(a.setModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the effort level right of the model and changes it', () => {
+    const a = render([ws('a', { effort: 'high' })], 'a');
+    const select = host.querySelector('.model-seg + select.effort-select') as HTMLSelectElement;
+    expect(select.value).toBe('high');
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max']);
+    const change = (v: string) =>
+      act(() => {
+        select.value = v;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    change('max');
+    expect(a.setEffort).toHaveBeenCalledWith('a', 'max');
+    change('');
+    expect(a.setEffort).toHaveBeenLastCalledWith('a', null);
+  });
+
+  it('effort cannot change while a Claude task runs', () => {
+    render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
+    expect((host.querySelector('select.effort-select') as HTMLSelectElement).disabled).toBe(true);
   });
 
   it('Clear runs /clear for the active Workspace', () => {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MODEL_CHOICES, type ModelChoice } from '../../../shared/models';
+import { EFFORT_CHOICES, EFFORT_LABELS, isEffortChoice, MODEL_CHOICES, type EffortChoice, type ModelChoice } from '../../../shared/models';
 import type { WorkspaceView } from '../../../shared/state';
 import { needsReviewDecision, shortPath } from '../viewModel';
 import { DiagnosticsPanel, type DiagnosticsApi } from './DiagnosticsPanel';
@@ -14,6 +14,8 @@ export interface DevPaneActions {
   sendReview(id: string, taskId: string): void;
   restartTerminal(id: string): void;
   setModel(id: string, model: ModelChoice): void;
+  /** null = Claude Code's default effort. */
+  setEffort(id: string, effort: EffortChoice | null): void;
   /** Runs Claude Code's /clear in the terminal. */
   clearTerminal(id: string): void;
   /** Runs Claude Code's /copy in the terminal (copies the last response). */
@@ -83,6 +85,24 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
               </button>
             ))}
           </div>
+          <select
+            className="effort-select"
+            aria-label="Claude effort"
+            value={active?.effort ?? ''}
+            disabled={!active || running}
+            title={running ? 'Wait for the running Claude task to finish' : "Set the terminal's Claude effort level"}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (active) actions.setEffort(active.id, isEffortChoice(v) ? v : null);
+            }}
+          >
+            <option value="">Default effort</option>
+            {EFFORT_CHOICES.map((e) => (
+              <option key={e} value={e}>
+                {EFFORT_LABELS[e]} effort
+              </option>
+            ))}
+          </select>
           {running && (
             <button className="btn danger small" onClick={() => active && actions.cancelTask(active.id)}>
               Stop

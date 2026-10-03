@@ -139,6 +139,10 @@ export function App({ api }: { api: WorkspaceApi }) {
         void api.setModel(id, model).then((r) => {
           if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Model not changed', body: r.detail ?? '' });
         }),
+      setEffort: (id, effort) =>
+        void api.setEffort(id, effort).then((r) => {
+          if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Effort not changed', body: r.detail ?? '' });
+        }),
     }),
     [api, toast],
   );

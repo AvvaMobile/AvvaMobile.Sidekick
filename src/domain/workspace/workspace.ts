@@ -1,4 +1,4 @@
-import type { ModelChoice } from '../../shared/models';
+import type { EffortChoice, ModelChoice } from '../../shared/models';
 import type { FlowEntry } from '../../shared/state';
 
 export interface WorkspaceRecord {
@@ -21,6 +21,8 @@ export interface WorkspaceRecord {
   open?: boolean;
   /** Model chosen for the terminal's Claude Code; none = Claude Code's own default. */
   model?: ModelChoice | null;
+  /** Effort level chosen for the terminal's Claude Code; none = Claude Code's own default. */
+  effort?: EffortChoice | null;
   /** Recent ChatGPT <-> Claude flow steps, newest last ("where did I leave off?"). */
   flowLog?: FlowEntry[];
 }
