@@ -66,11 +66,6 @@ export class DevelopmentPaneRegistry {
     return this.pane(workspaceId).buffer;
   }
 
-  /** Forgets the stored terminal output (the "Clear" button); the PTY itself is untouched. */
-  clearBuffer(workspaceId: string): void {
-    this.pane(workspaceId).buffer = '';
-  }
-
   onEvent(listener: (e: DevPaneEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

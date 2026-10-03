@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DeferredRelaunch } from '../DeferredRelaunch';
-import { DevelopmentPaneRegistry } from '../../development/DevelopmentPane';
 
 function make(working = false, running = true) {
   const st = { working, running };
@@ -51,18 +50,5 @@ describe('DeferredRelaunch (model / effort picked during a running turn)', () =>
     d.forget('b');
     d.settled('b');
     expect(relaunch).not.toHaveBeenCalled();
-  });
-});
-
-describe('Clear', () => {
-  it('empties the stored terminal output only (no PTY input)', () => {
-    const panes = new DevelopmentPaneRegistry();
-    panes.ensure('a');
-    const write = vi.fn();
-    panes.attachPty('a', { write });
-    panes.writeOutput('a', 'pty', 'lots of output');
-    panes.clearBuffer('a');
-    expect(panes.snapshot('a')).toBe('');
-    expect(write).not.toHaveBeenCalled();
   });
 });

@@ -12,7 +12,7 @@ import { SetupDialog } from './components/SetupDialog';
 import { ProjectSettings } from './components/ProjectSettings';
 import { StartPage } from './components/StartPage';
 import { TabBar } from './components/TabBar';
-import { clearTerminalView, disposeTerminal, terminalData } from './terminals';
+import { disposeTerminal, terminalData } from './terminals';
 import { needsReviewDecision, relayState } from './viewModel';
 
 const EMPTY: ShellState = { workspaces: [], projects: [], activeWorkspaceId: null, debugMode: false };
@@ -133,7 +133,7 @@ export function App({ api }: { api: WorkspaceApi }) {
           if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Review not sent', body: r.detail ?? '' });
         }),
       restartTerminal: (id) => void api.terminalRestart(id),
-      clearTerminal: (id) => clearTerminalView(id),
+      clearTerminal: (id) => api.terminalInput(id, '/clear\r'),
       responseInfo: (id) => api.responseInfo(id),
       copyResponse: async (id, target) => {
         const r = await api.copyResponse(id, target);

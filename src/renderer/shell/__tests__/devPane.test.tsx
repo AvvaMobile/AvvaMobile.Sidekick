@@ -105,7 +105,7 @@ describe('development pane UI', () => {
     expect(a.setEffort).toHaveBeenLastCalledWith('a', null);
   });
 
-  it('while a task runs only STOP reflects it: model, effort, Clear and Copy stay usable', () => {
+  it('while a task runs only STOP reflects it: model, effort and Copy stay usable', () => {
     const a = render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
     expect(buttonLabels()).toContain('Stop');
     expect((host.querySelector('select.effort-select') as HTMLSelectElement).disabled).toBe(false);
@@ -113,7 +113,6 @@ describe('development pane UI', () => {
     expect(byText('Sonnet').disabled).toBe(false);
     act(() => byText('Sonnet').click());
     expect(a.setModel).toHaveBeenCalledWith('a', 'sonnet'); // applied to the next turn by the main process
-    expect(byText('Clear').disabled).toBe(false);
     expect(byText('Copy').disabled).toBe(false);
   });
 
@@ -124,12 +123,13 @@ describe('development pane UI', () => {
     }
   });
 
-  it('Clear only clears the terminal view: it never cancels the task or touches the session', () => {
-    const a = render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
-    act(() => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Clear') as HTMLButtonElement).click());
+  it('Clear runs /clear for the active Workspace, but not while a task runs (it would be queued into that turn)', () => {
+    const a = render([ws('a')], 'a');
+    const clear = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Clear') as HTMLButtonElement;
+    act(() => clear().click());
     expect(a.clearTerminal).toHaveBeenCalledWith('a');
-    expect(a.cancelTask).not.toHaveBeenCalled();
-    expect(a.resetSession).not.toHaveBeenCalled();
+    render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
+    expect(clear().disabled).toBe(true);
   });
 
   it('Copy copies the last response through the app (never /copy in the terminal), even while a task runs', () => {

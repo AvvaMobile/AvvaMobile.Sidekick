@@ -856,10 +856,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     return known(id) && t ? responses.copy(id, t) : { ok: false, code: 'invalid', detail: '' };
   });
   handle('review:send', (id, taskId) => (known(id) && isId(taskId) ? orchestrator.sendReview(id, taskId) : { ok: false, code: 'invalid', detail: '' }));
-  // Clear = empty the visible terminal buffer only: nothing is sent to Claude, no session or task state changes.
-  handle('terminal:clear-view', (id) => {
-    if (known(id)) panes.clearBuffer(id);
-  });
   handle('terminal:restart', (id) => {
     if (known(id)) pty.restart(id);
   });
