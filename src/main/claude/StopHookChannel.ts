@@ -25,6 +25,7 @@ export class StopHookChannel {
   private readonly watchers = new Map<string, FSWatcher>();
   private readonly listeners = new Map<string, Set<(e: StopEvent) => void>>();
   private readonly promptListeners = new Map<string, Set<(e: PromptSubmitEvent) => void>>();
+  private readonly interruptListeners = new Map<string, Set<() => void>>();
   /** Workspaces whose Claude reported a submitted prompt and no Stop since (a turn is in progress). */
   private readonly busy = new Set<string>();
 
@@ -71,6 +72,7 @@ export class StopHookChannel {
     this.watchers.delete(workspaceId);
     this.listeners.delete(workspaceId);
     this.promptListeners.delete(workspaceId);
+    this.interruptListeners.delete(workspaceId);
     this.busy.delete(workspaceId);
   }
 
@@ -102,6 +104,23 @@ export class StopHookChannel {
   /** The turn was interrupted (Escape / Ctrl+C), which ends it without a Stop event. */
   markIdle(workspaceId: string): void {
     this.busy.delete(workspaceId);
+  }
+
+  /** Subscribes to user interrupts (Escape / Ctrl+C typed into the terminal) of one Workspace. Returns an unsubscribe function. */
+  onInterrupt(workspaceId: string, cb: () => void): () => void {
+    let set = this.interruptListeners.get(workspaceId);
+    if (!set) this.interruptListeners.set(workspaceId, (set = new Set()));
+    set.add(cb);
+    return () => set.delete(cb);
+  }
+
+  /**
+   * The user pressed Escape / Ctrl+C in the terminal: the turn ends without a Stop event, so the busy
+   * mark is cleared and a managed run waiting for its Stop learns that it was interrupted.
+   */
+  interrupt(workspaceId: string): void {
+    this.markIdle(workspaceId);
+    for (const cb of [...(this.interruptListeners.get(workspaceId) ?? [])]) cb();
   }
 
   /** Delivers one parsed hook payload (exposed for tests; the watcher calls it for every event file). */

@@ -138,6 +138,7 @@ export class PtyService {
     const old = e.pty;
     e.pty = null;
     if (old) this.kill(old);
+    this.notifyEnded(e, old);
     this.start(workspaceId, e.cwd, { fresh: false });
   }
 
@@ -148,8 +149,14 @@ export class PtyService {
     const old = e.pty;
     e.pty = null;
     if (old) this.kill(old);
+    this.notifyEnded(e, old);
     e.cwd = cwd;
     this.start(workspaceId, cwd, { fresh: true });
+  }
+
+  /** A replaced process never reports its own exit (its output and exit are ignored): tell the listeners it ended. */
+  private notifyEnded(e: Entry, old: PtyProcess | null): void {
+    if (old) for (const l of [...e.exitListeners]) l();
   }
 
   resize(workspaceId: string, cols: number, rows: number): void {

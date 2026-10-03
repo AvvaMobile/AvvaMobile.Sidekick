@@ -33,6 +33,11 @@ export interface ReviewView {
   body: string;
 }
 
+/** The latest completed Claude result that can still be handed to ChatGPT (survives a task running now). */
+export interface LatestReviewView extends ReviewView {
+  taskId: string;
+}
+
 export interface TaskView {
   id: string;
   status: TaskStatus;
@@ -83,6 +88,7 @@ export interface WorkspaceView {
   /** Send to Claude is capturing the prompt right now. */
   sending: boolean;
   task: TaskView | null;
+  latestReview: LatestReviewView | null;
   terminal: { running: boolean; error: string | null };
   /** The user asked ChatGPT to send the prompt to Claude: it is sent at `at` (ISO) unless cancelled (D034). */
   autoSend: { at: string } | null;

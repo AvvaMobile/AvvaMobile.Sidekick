@@ -9,12 +9,12 @@ const ws = (over: Partial<WorkspaceView> = {}): WorkspaceView =>
     candidate: null,
     sending: false,
     task: null,
+    latestReview: null,
     chatgpt: { loggedIn: true, generating: false },
     ...over,
   }) as unknown as WorkspaceView;
 
-const review = (status: 'pending' | 'sending') =>
-  ({ id: 't1', status: 'review_pending', outcome: 'succeeded', review: { status, lastError: null, body: 'b' } }) as unknown as WorkspaceView['task'];
+const review = (status: 'pending' | 'sending') => ({ taskId: 't1', status, lastError: null, body: 'b' }) as WorkspaceView['latestReview'];
 
 describe('relay buttons', () => {
   it('are both disabled without a prompt or a pending review', () => {
@@ -32,9 +32,12 @@ describe('relay buttons', () => {
     expect(relayState(ws({ candidate: { text: 'do it', messageId: 'm', alreadySent: false }, sending: true }), false).claude.enabled).toBe(false);
   });
 
-  it('Send to ChatGPT is enabled only while a review is pending', () => {
-    expect(relayState(ws({ task: review('pending') }), false).chatgpt).toEqual({ enabled: true, title: 'Send to ChatGPT' });
-    expect(relayState(ws({ task: review('sending') }), false).chatgpt.enabled).toBe(false);
+  it('Send to ChatGPT is enabled while a completed result waits, also while a later task runs', () => {
+    expect(relayState(ws({ latestReview: review('pending') }), false).chatgpt).toEqual({ enabled: true, title: 'Send to ChatGPT' });
+    expect(relayState(ws({ latestReview: review('sending') }), false).chatgpt.enabled).toBe(false);
+    const running = ws({ latestReview: review('pending'), task: { id: 't2', status: 'running' } as WorkspaceView['task'] });
+    expect(relayState(running, false).chatgpt.enabled).toBe(true);
+    expect(relayState(running, false).claude.enabled).toBe(false); // a second task cannot start
   });
 
   it('the overlay is centred on the splitter', () => {

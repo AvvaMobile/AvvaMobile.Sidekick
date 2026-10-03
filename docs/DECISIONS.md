@@ -331,3 +331,13 @@ The development pane's Copy copies from the last completed Claude response of th
 
 Reason:
 Terminal text carries renderer decorations and wrapping, so selecting code there is unreliable. The raw response keeps the fences and language labels exactly (verified from the transcript).
+
+## D041 - A managed run always ends; the toolbar follows the run, not the session
+
+Decision:
+A managed Claude task (`InteractiveClaudeRunner`) ends only from hook and process signals, never from terminal output: the `Stop` hook after our prompt was acknowledged, the user's Escape / Ctrl+C in the terminal (`StopHookChannel.interrupt` → task `cancelled`), the terminal process ending or being replaced (`PtyService.relaunch`/`restartIn` now notify exit listeners), or no `UserPromptSubmit` for our prompt while Claude is idle for 30 s (task fails). The renderer's STOP, and every control that depends on a running task, derives from the task status, which is final as soon as the run ends.
+The latest completed result (`WorkspaceView.latestReview`) is independent of the active task: it stays available for Send to ChatGPT while a later task runs, a later success replaces it, a later cancelled task does not. Copy works from the last response regardless of a running task.
+Clear empties the terminal view only (no `/clear`). Model and effort can be changed while a task runs; the choice is stored at once and the terminal's Claude is relaunched (same session) only when nothing is running any more (`DeferredRelaunch`).
+
+Reason:
+Interrupting with Escape/Ctrl+C ends a Claude turn without a `Stop` event, and a relaunch hid the old process's exit, so a run could wait forever: STOP stayed, and the toolbar (disabled whenever a task "ran") stayed locked.

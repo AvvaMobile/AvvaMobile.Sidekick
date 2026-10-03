@@ -311,6 +311,108 @@ describe('WorkspaceOrchestrator', () => {
     expect(orch.view('a')!.task!.outcome).toBe('cancelled');
   });
 
+  describe('execution lifecycle', () => {
+    const settled: string[] = [];
+    beforeEach(() => {
+      settled.length = 0;
+    });
+    const cancelledExit = (req: ClaudeRunRequest) => req.onExit({ code: null, signal: null, spawnError: null, cancelled: true });
+
+    it('completion clears the active execution at once and keeps the result', async () => {
+      const req = await startTask('a');
+      expect(orch.activeTaskWorkspaceIds()).toEqual(['a']);
+      complete(req, 'Result A');
+      await flush();
+      expect(orch.activeTaskWorkspaceIds()).toEqual([]);
+      expect(orch.view('a')!.latestReview!.body).toContain('Result A');
+    });
+
+    it('a user interrupt (runner reports cancelled) finalizes the task as cancelled — no stale running state', async () => {
+      const req = await startTask('a');
+      cancelledExit(req);
+      await flush();
+      const v = orch.view('a')!;
+      expect(v.task!.status).toBe('review_pending');
+      expect(v.task!.outcome).toBe('cancelled');
+      expect(orch.activeTaskWorkspaceIds()).toEqual([]);
+      expect(orch.cancelTask('a')).toMatchObject({ ok: false, code: 'no_active_task' });
+    });
+
+    it('the process ending without a result (exit, SIGINT, replaced terminal) finalizes the task as failed', async () => {
+      for (const exit of [{ code: 1, signal: null }, { code: null, signal: 'SIGINT' }, { code: null, signal: null }]) {
+        const req = await startTask('a');
+        req.onExit({ ...exit, spawnError: null });
+        await flush();
+        expect(orch.view('a')!.task!.outcome).toBe('failed');
+        expect(orch.activeTaskWorkspaceIds()).toEqual([]);
+        blocks.a = ok(`Prompt ${Math.random()}`, `m-${Math.random()}`);
+        seen('a', blocks.a);
+      }
+    });
+
+    it('STOP (cancel) both signals the runner and ends in cancelled once the runner exits', async () => {
+      const req = await startTask('a');
+      expect(orch.cancelTask('a').ok).toBe(true);
+      cancelledExit(req);
+      await flush();
+      expect(orch.view('a')!.task!.outcome).toBe('cancelled');
+      expect(orch.activeTaskWorkspaceIds()).toEqual([]);
+    });
+
+    it('the previous completed result stays available while a later task runs, and the new one replaces it when it completes', async () => {
+      const a1 = await startTask('a');
+      complete(a1, 'Result A');
+      await flush();
+      const firstTask = orch.view('a')!.latestReview!.taskId;
+      blocks.a = ok('Second prompt', 'msg-2');
+      seen('a', blocks.a);
+      const a2 = await startTask('a');
+      const during = orch.view('a')!;
+      expect(during.task!.status).toBe('running');
+      expect(during.latestReview).toMatchObject({ taskId: firstTask, status: 'pending' });
+      expect(during.latestReview!.body).toContain('Result A');
+      complete(a2, 'Result B');
+      await flush();
+      expect(orch.view('a')!.latestReview!.body).toContain('Result B');
+    });
+
+    it('a cancelled later task does not replace an earlier completed result; it can be handed to ChatGPT meanwhile', async () => {
+      const a1 = await startTask('a');
+      complete(a1, 'Result A');
+      await flush();
+      const firstTask = orch.view('a')!.latestReview!.taskId;
+      blocks.a = ok('Second prompt', 'msg-2');
+      seen('a', blocks.a);
+      const a2 = await startTask('a');
+      // hand the previous result over while the second task is still running
+      expect((await orch.sendReview('a', firstTask)).ok).toBe(true);
+      expect(chats.a!.inserted[0]).toContain('Result A');
+      cancelledExit(a2);
+      await flush();
+      expect(orch.view('a')!.task!.outcome).toBe('cancelled');
+    });
+
+    it('a cancelled task alone still offers its own review (nothing earlier to keep)', async () => {
+      const req = await startTask('a');
+      cancelledExit(req);
+      await flush();
+      expect(orch.view('a')!.latestReview).toMatchObject({ taskId: orch.view('a')!.task!.id });
+    });
+
+    it('Workspaces stay isolated: finishing or cancelling one never touches the other', async () => {
+      const ra = await startTask('a');
+      const rb = await startTask('b');
+      cancelledExit(ra);
+      await flush();
+      expect(orch.activeTaskWorkspaceIds()).toEqual(['b']);
+      expect(orch.view('b')!.task!.status).toBe('running');
+      expect(orch.view('b')!.latestReview).toBeNull();
+      complete(rb, 'Result B');
+      await flush();
+      expect(orch.view('a')!.latestReview!.body).not.toContain('Result B');
+    });
+  });
+
   it('reset session is refused while running and clears only this Workspace session', async () => {
     const req = await startTask('b');
     expect(orch.resetSession('b').ok).toBe(false);

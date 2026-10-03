@@ -7,21 +7,25 @@ import { sanitizeTerminalPrompt } from '../../../domain/handoff/promptText';
 import { InteractiveClaudeRunner, isSamePrompt } from '../InteractiveClaudeRunner';
 import { StopHookChannel, lastAssistantText, parseHookPayload, parseStopPayload, type PromptSubmitEvent, type StopEvent } from '../StopHookChannel';
 
-function setup(running = true, busy = false, prompt = 'do it') {
+function setup(running = true, busy = false, prompt = 'do it', ackMs = 30_000) {
   const writes: string[] = [];
   let stop: (e: StopEvent) => void = () => {};
   let submitted: (e: PromptSubmitEvent) => void = () => {};
   let exit: () => void = () => {};
+  let interrupt: () => void = () => {};
+  let isBusy = busy;
   const idle = vi.fn();
   const runner = new InteractiveClaudeRunner(
     { isRunning: () => running, write: (_id, d) => void writes.push(d), onExit: (_id, cb) => ((exit = cb), () => {}) },
     {
       onStop: (_id, cb) => ((stop = cb), () => {}),
       onPromptSubmit: (_id, cb) => ((submitted = cb), () => {}),
-      isBusy: () => busy,
+      onInterrupt: (_id, cb) => ((interrupt = cb), () => {}),
+      isBusy: () => isBusy,
       markIdle: idle,
     },
     () => null,
+    ackMs,
   );
   const events: unknown[] = [];
   const exits: unknown[] = [];
@@ -29,7 +33,7 @@ function setup(running = true, busy = false, prompt = 'do it') {
     taskId: 't', workspaceId: 'a', cwd: '/x', prompt, resumeSessionId: null,
     onEvent: (e) => events.push(e), onExit: (e) => exits.push(e),
   };
-  return { runner, req, writes, events, exits, idle, stop: (e: StopEvent) => stop(e), submitted: (p: string | null) => submitted({ sessionId: 's1', prompt: p }), exit: () => exit() };
+  return { runner, req, writes, events, exits, idle, stop: (e: StopEvent) => stop(e), submitted: (p: string | null) => submitted({ sessionId: 's1', prompt: p }), exit: () => exit(), interrupt: () => interrupt(), setBusy: (b: boolean) => void (isBusy = b) };
 }
 
 describe('InteractiveClaudeRunner', () => {
@@ -65,7 +69,7 @@ describe('InteractiveClaudeRunner', () => {
     const b = setup();
     b.runner.start(b.req).cancel();
     expect(b.writes).toContain('\x1b');
-    expect(b.exits).toHaveLength(1);
+    expect(b.exits).toEqual([{ code: null, signal: null, spawnError: null, cancelled: true }]);
     expect(b.idle).toHaveBeenCalledWith('a');
   });
 
@@ -114,6 +118,66 @@ describe('InteractiveClaudeRunner', () => {
   });
 });
 
+describe('InteractiveClaudeRunner lifecycle: a run always ends', () => {
+  afterEach(() => vi.useRealTimers());
+  const stopEv = (text: string): StopEvent => ({ sessionId: 's1', transcriptPath: null, lastAssistantMessage: text });
+
+  it('the user pressing Escape / Ctrl+C while the turn runs ends it as cancelled, with no result', () => {
+    vi.useFakeTimers();
+    const t = setup();
+    t.runner.start(t.req);
+    t.submitted('do it');
+    t.interrupt();
+    expect(t.exits).toEqual([{ code: null, signal: null, spawnError: null, cancelled: true }]);
+    expect(t.events.filter((e) => (e as { type: string }).type === 'result')).toEqual([]);
+    // the run is final: a late Stop or terminal exit cannot end it a second time
+    t.stop(stopEv('late'));
+    t.exit();
+    expect(t.exits).toHaveLength(1);
+  });
+
+  it('an interrupt before Claude acknowledged the prompt (e.g. Escape clears the pasted text) also ends it', () => {
+    vi.useFakeTimers();
+    const t = setup();
+    t.runner.start(t.req);
+    t.interrupt();
+    expect(t.exits).toEqual([expect.objectContaining({ cancelled: true })]);
+  });
+
+  it('a prompt that never reaches Claude fails once Claude has been idle for the acknowledgement time', () => {
+    vi.useFakeTimers();
+    const t = setup(true, false, 'do it', 1000);
+    t.runner.start(t.req);
+    vi.advanceTimersByTime(999);
+    expect(t.exits).toEqual([]);
+    vi.advanceTimersByTime(2);
+    expect(t.exits).toEqual([expect.objectContaining({ spawnError: expect.stringContaining('did not report receiving') })]);
+  });
+
+  it('the acknowledgement clock waits while Claude works on another turn (our prompt is queued behind it)', () => {
+    vi.useFakeTimers();
+    const t = setup(true, false, 'do it', 1000);
+    t.runner.start(t.req);
+    t.setBusy(true);
+    vi.advanceTimersByTime(5000);
+    expect(t.exits).toEqual([]);
+    t.setBusy(false);
+    vi.advanceTimersByTime(1100);
+    expect(t.exits).toHaveLength(1);
+  });
+
+  it('an acknowledged prompt is never failed by the acknowledgement clock', () => {
+    vi.useFakeTimers();
+    const t = setup(true, false, 'do it', 1000);
+    t.runner.start(t.req);
+    t.submitted('do it');
+    vi.advanceTimersByTime(60_000);
+    expect(t.exits).toEqual([]);
+    t.stop(stopEv('Done.'));
+    expect(t.exits).toEqual([{ code: 0, signal: null, spawnError: null }]);
+  });
+});
+
 describe('sanitizeTerminalPrompt', () => {
   it('keeps text, newlines and tabs; normalizes line endings; drops escape sequences and control characters', () => {
     expect(sanitizeTerminalPrompt('a\tb\r\nc\rd\n')).toBe('a\tb\nc\nd\n');
@@ -133,6 +197,20 @@ describe('isSamePrompt', () => {
 });
 
 describe('StopHookChannel', () => {
+  it('interrupt clears the busy mark and tells only that Workspace\'s listeners', () => {
+    const ch = new StopHookChannel(mkdtempSync(join(tmpdir(), 'hooks-')));
+    const a = vi.fn();
+    const b = vi.fn();
+    ch.onInterrupt('a', a);
+    ch.onInterrupt('b', b);
+    ch.dispatch('a', JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'x' }), 'prompt');
+    expect(ch.isBusy('a')).toBe(true);
+    ch.interrupt('a');
+    expect(ch.isBusy('a')).toBe(false);
+    expect(a).toHaveBeenCalledOnce();
+    expect(b).not.toHaveBeenCalled();
+  });
+
   it('tracks a turn in progress between UserPromptSubmit and Stop', () => {
     const ch = new StopHookChannel(mkdtempSync(join(tmpdir(), 'hooks-')));
     const prompts: PromptSubmitEvent[] = [];

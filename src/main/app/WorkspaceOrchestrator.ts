@@ -4,7 +4,7 @@ import { appendFlow } from '../../domain/flow/flow';
 import { AUTO_SEND_DELAY_MS, isSendToClaudeRequest } from '../../domain/handoff/autoSend';
 import { isTaskActive, newTask, transition, type TaskRecord } from '../../domain/task/task';
 import { initialFor } from '../../domain/workspace/workspace';
-import type { AttentionState, FlowKind, TaskView, WorkspaceView } from '../../shared/state';
+import type { AttentionState, FlowKind, LatestReviewView, TaskView, WorkspaceView } from '../../shared/state';
 import type { AdapterResult, ClaudePromptCandidate } from '../chatgpt/ChatGPTAdapter';
 import type { ClaudeRunHandle, ClaudeRunnerPort, ClaudeStreamEvent } from '../claude/ClaudeRunner';
 import { CLAUDE_BUSY_MESSAGE } from '../claude/InteractiveClaudeRunner';
@@ -53,6 +53,8 @@ export interface OrchestratorDeps {
   defaultModel?(): ModelChoice | null;
   /** The terminal's Claude is in the middle of a turn (a prompt submitted, no Stop yet). */
   claudeBusy?(workspaceId: string): boolean;
+  /** A managed task reached its final state (nothing is running for this Workspace any more). */
+  taskSettled?(workspaceId: string): void;
   newId?: () => string;
   now?: () => Date;
 }
@@ -65,6 +67,8 @@ interface Runtime {
   cancelRequested: boolean;
   resultSeen: boolean;
   reviewSending: boolean;
+  /** Task whose review packet the user can hand to ChatGPT: the latest completed result, independent of a task that is running now. */
+  reviewTaskId: string | null;
   /** Send to Claude capture in progress (blocks double clicks). */
   sending: boolean;
   terminal: { running: boolean; error: string | null };
@@ -111,6 +115,7 @@ export class WorkspaceOrchestrator {
       cancelRequested: false,
       resultSeen: false,
       reviewSending: false,
+      reviewTaskId: null,
       sending: false,
       terminal: { running: false, error: null },
       pendingCandidateKey: null,
@@ -317,7 +322,7 @@ export class WorkspaceOrchestrator {
         task.processExitCode = exit.code;
         task.processSignal = exit.signal;
         task.completedAt = this.now().toISOString();
-        if (live.cancelRequested) {
+        if (live.cancelRequested || exit.cancelled) {
           transition(task, 'cancelled');
           task.outcome = 'cancelled';
         } else if (live.resultSeen && !task.error) {
@@ -352,6 +357,7 @@ export class WorkspaceOrchestrator {
       // the store logs its own write failures
     }
     this.deps.onChange();
+    this.deps.taskSettled?.(workspaceId);
   }
 
   private onClaudeEvent(workspaceId: string, task: TaskRecord, ev: ClaudeStreamEvent): void {
@@ -403,6 +409,9 @@ export class WorkspaceOrchestrator {
     task.reviewPacketId = packet.id;
     transition(task, 'review_pending');
     this.deps.store.putTask(task);
+    // A cancelled run does not replace an earlier completed result that is still waiting for review.
+    const kept = rt.reviewTaskId ? this.deps.store.task(rt.reviewTaskId) : undefined;
+    if (task.outcome !== 'cancelled' || kept?.status !== 'review_pending') rt.reviewTaskId = task.id;
 
     const outcome = task.outcome!;
     this.flow(workspaceId, 'claude_finished', outcome === 'succeeded' ? 'Claude finished' : `Claude ${outcome}`);
@@ -419,6 +428,7 @@ export class WorkspaceOrchestrator {
       background,
     });
     this.deps.onChange();
+    this.deps.taskSettled?.(workspaceId);
   }
 
   // ---------- Review handback (user-approved only) ----------
@@ -518,8 +528,18 @@ export class WorkspaceOrchestrator {
       sending: rt.sending,
       autoSend: rt.autoSend ? { at: rt.autoSend.at } : null,
       task: task ? this.taskView(task, rt) : null,
+      latestReview: this.latestReview(workspaceId, rt, task),
       terminal: rt.terminal,
     };
+  }
+
+  /** The completed result the user can still hand to ChatGPT; it survives a later task that is running. */
+  private latestReview(workspaceId: string, rt: Runtime, current: TaskRecord | undefined): LatestReviewView | null {
+    const kept = rt.reviewTaskId ? this.deps.store.task(rt.reviewTaskId) : undefined;
+    const task = kept?.workspaceId === workspaceId && kept.status === 'review_pending' ? kept : current?.status === 'review_pending' ? current : undefined;
+    const packet = task && this.deps.store.reviewPacket(task.reviewPacketId);
+    if (!task || !packet) return null;
+    return { taskId: task.id, status: rt.reviewSending ? 'sending' : packet.deliveryStatus, lastError: packet.lastDeliveryError, body: packet.body };
   }
 
   private taskView(task: TaskRecord, rt: Runtime): TaskView {

@@ -33,6 +33,7 @@ import { ChatGPTAdapter, MAX_PROMPT_CHARS } from '../chatgpt/ChatGPTAdapter';
 import { InteractiveClaudeRunner } from '../claude/InteractiveClaudeRunner';
 import { isClaudeSessionId, launchCommand, loginShellEnv, resolveClaudeExecutable } from '../claude/ClaudeRunner';
 import { StopHookChannel, hookSettings } from '../claude/StopHookChannel';
+import { DeferredRelaunch } from './DeferredRelaunch';
 import { ResponseCopier } from './ResponseCopier';
 import { DevelopmentPaneRegistry } from '../development/DevelopmentPane';
 import { createDiagnosticsLog } from '../diagnostics/diagnosticsLog';
@@ -328,6 +329,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     iconFor: (id) => icons.dataUrl(id, store.workspace(id)?.iconFile),
     defaultModel: () => defaultModel,
     claudeBusy: (id) => stopHooks.isBusy(id),
+    taskSettled: (id) => relaunches.settled(id),
   });
 
   panes.onEvent((e) => {
@@ -385,6 +387,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     stopHooks.onStop(w.id, (e) => {
       responses.record(w.id, e);
       orchestrator.observeClaudeStop(w.id);
+      relaunches.settled(w.id);
     });
     const view = createChatGptView(
       {
@@ -428,6 +431,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     pty.stop(id);
     stopHooks.close(id);
     responses.forget(id);
+    relaunches.forget(id);
     if (c) {
       if (sw && !sw.win.isDestroyed()) sw.win.contentView.removeChildView(c.view);
       c.view.webContents.close();
@@ -698,6 +702,14 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   });
   // Model shortcut: relaunch the terminal's Claude Code with --model, resuming the same session.
   const taskActive = (id: string) => orchestrator.activeTaskWorkspaceIds().includes(id);
+  const relaunches = new DeferredRelaunch({
+    working: (id) => !known(id) || taskActive(id) || stopHooks.isBusy(id),
+    isRunning: (id) => pty.isRunning(id),
+    relaunch: (id, why) => {
+      panes.writeOutput(id, 'pty', `\r\n\x1b[2m[Switching to ${why}…]\x1b[0m\r\n`);
+      pty.relaunch(id);
+    },
+  });
   /** Stores the model choice (null = app default) and relaunches the terminal's Claude Code if the effective model changed. */
   const applyModel = (id: string, model: ModelChoice | null, relaunch = true): { ok: true } | { ok: false; detail: string } => {
     const w = store.workspace(id);
@@ -705,12 +717,8 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     const before = w.model ?? defaultModel;
     const after = model ?? defaultModel;
     if ((w.model ?? null) === model) return { ok: true };
-    if (before !== after && taskActive(id)) return { ok: false, detail: 'Claude is running a task in this project. Switch the model after it finishes.' };
     store.updateWorkspace(id, { model });
-    if (relaunch && before !== after && pty.isRunning(id)) {
-      panes.writeOutput(id, 'pty', `\r\n\x1b[2m[Switching to ${after ?? 'the default model'}…]\x1b[0m\r\n`);
-      pty.relaunch(id);
-    }
+    if (relaunch && before !== after && pty.isRunning(id)) relaunches.request(id, after ?? 'the default model');
     broadcast();
     return { ok: true };
   };
@@ -724,12 +732,8 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   handle('workspace:set-effort', (id, effort) => {
     if (!known(id) || (effort !== null && !isEffortChoice(effort))) return { ok: false };
     if ((store.workspace(id)!.effort ?? null) === effort) return { ok: true };
-    if (taskActive(id)) return { ok: false, detail: 'Claude is running a task in this project. Change the effort after it finishes.' };
     store.updateWorkspace(id, { effort });
-    if (pty.isRunning(id)) {
-      panes.writeOutput(id, 'pty', `\r\n\x1b[2m[Switching to ${effort ?? 'the default'} effort…]\x1b[0m\r\n`);
-      pty.relaunch(id);
-    }
+    if (pty.isRunning(id)) relaunches.request(id, `${effort ?? 'the default'} effort`);
     broadcast();
     return { ok: true };
   });
@@ -852,6 +856,10 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     return known(id) && t ? responses.copy(id, t) : { ok: false, code: 'invalid', detail: '' };
   });
   handle('review:send', (id, taskId) => (known(id) && isId(taskId) ? orchestrator.sendReview(id, taskId) : { ok: false, code: 'invalid', detail: '' }));
+  // Clear = empty the visible terminal buffer only: nothing is sent to Claude, no session or task state changes.
+  handle('terminal:clear-view', (id) => {
+    if (known(id)) panes.clearBuffer(id);
+  });
   handle('terminal:restart', (id) => {
     if (known(id)) pty.restart(id);
   });
@@ -860,7 +868,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     const { workspaceId, data } = (arg ?? {}) as { workspaceId?: unknown; data?: unknown };
     if (!known(workspaceId) || typeof data !== 'string' || data.length > 65_536) return;
     // Escape / Ctrl+C interrupt Claude's turn, which then ends without a Stop event.
-    if (data === '\x1b' || data === '\x03') stopHooks.markIdle(workspaceId);
+    if (data === '\x1b' || data === '\x03') stopHooks.interrupt(workspaceId);
     panes.writeUserInput(workspaceId, data);
   });
   on('terminal:resize', (arg) => {

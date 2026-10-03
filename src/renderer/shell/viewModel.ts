@@ -29,8 +29,9 @@ export function sendState(ws: WorkspaceView | null): SendState {
   return { enabled: true, indicator: 'ready', label: 'Prompt ready', reason: 'Send the latest Claude Prompt block to Claude Code' };
 }
 
+/** A completed Claude result waits to be handed to ChatGPT (independent of a task that runs now). */
 export function needsReviewDecision(ws: WorkspaceView | null): boolean {
-  return ws?.task?.status === 'review_pending' && !!ws.task.review;
+  return !!ws?.latestReview;
 }
 
 export function shortPath(p: string): string {
@@ -43,7 +44,7 @@ export function shortPath(p: string): string {
 /** The divider's round relay buttons: always shown, enabled only when that hand-off is possible. */
 export function relayState(ws: WorkspaceView | null, busy: boolean): RelayState {
   const send = sendState(ws);
-  const review = needsReviewDecision(ws) ? ws!.task!.review! : null;
+  const review = ws?.latestReview ?? null;
   return {
     claude: { enabled: send.enabled && !busy, title: send.enabled ? 'Send to Claude' : `Send to Claude — ${send.reason}` },
     chatgpt: review

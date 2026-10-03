@@ -17,7 +17,7 @@ export interface DevPaneActions {
   setModel(id: string, model: ModelChoice): void;
   /** null = Claude Code's default effort. */
   setEffort(id: string, effort: EffortChoice | null): void;
-  /** Runs Claude Code's /clear in the terminal. */
+  /** Empties the visible terminal only (no Claude command, no session or task change). */
   clearTerminal(id: string): void;
   /** Code blocks of Claude's last completed response (labels for the Copy menu). */
   responseInfo(id: string): Promise<{ available: boolean; blocks: BlockInfo[] }>;
@@ -54,8 +54,8 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
         <div className="header-right">
           <button
             className="btn"
-            disabled={!active || running || !(active?.terminal.running ?? false)}
-            title="Clear the Claude conversation (/clear)"
+            disabled={!active}
+            title="Clear the terminal screen (the Claude conversation is kept)"
             onClick={() => active && actions.clearTerminal(active.id)}
           >
             Clear
@@ -117,8 +117,8 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
                 key={m}
                 className={active?.model === m ? 'on' : ''}
                 aria-pressed={active?.model === m}
-                disabled={!active || running}
-                title={running ? 'Wait for the running Claude task to finish' : `Switch the terminal's Claude to ${m}`}
+                disabled={!active}
+                title={running ? `Use ${m} from the next turn` : `Switch the terminal's Claude to ${m}`}
                 onClick={() => active && active.model !== m && actions.setModel(active.id, m)}
               >
                 {m[0]!.toUpperCase() + m.slice(1)}
@@ -129,8 +129,8 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
             className="effort-select"
             aria-label="Claude effort"
             value={active?.effort ?? ''}
-            disabled={!active || running}
-            title={running ? 'Wait for the running Claude task to finish' : "Set the terminal's Claude effort level"}
+            disabled={!active}
+            title={running ? 'Applies from the next turn' : "Set the terminal's Claude effort level"}
             onChange={(e) => {
               const v = e.target.value;
               if (active) actions.setEffort(active.id, isEffortChoice(v) ? v : null);

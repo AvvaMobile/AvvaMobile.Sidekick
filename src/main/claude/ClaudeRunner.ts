@@ -15,7 +15,8 @@ export interface ClaudeRunRequest {
   prompt: string;
   resumeSessionId: string | null;
   onEvent(event: ClaudeStreamEvent): void;
-  onExit(exit: { code: number | null; signal: string | null; spawnError: string | null }): void;
+  /** `cancelled`: the run ended because the user interrupted it (not a failure, not a result). */
+  onExit(exit: { code: number | null; signal: string | null; spawnError: string | null; cancelled?: boolean }): void;
 }
 
 export interface ClaudeRunHandle {

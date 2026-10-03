@@ -107,6 +107,19 @@ describe('PtyService', () => {
     expect(states).toEqual([true, true]);
   });
 
+  it('a replaced process (relaunch / restartIn) counts as ended for the managed run waiting on it', () => {
+    const panes = new DevelopmentPaneRegistry();
+    panes.ensure('a');
+    const svc = new PtyService(panes, () => fakePty() as unknown as PtyProcess, () => ({ SHELL: '/bin/zsh' }), () => {});
+    svc.start('a', tmpdir());
+    const ended = vi.fn();
+    svc.onExit('a', ended);
+    svc.relaunch('a');
+    expect(ended).toHaveBeenCalledOnce();
+    svc.restartIn('a', tmpdir());
+    expect(ended).toHaveBeenCalledTimes(2);
+  });
+
   it('stop force-kills a process that is still alive after the grace period, not one that exited', () => {
     vi.useFakeTimers();
     try {

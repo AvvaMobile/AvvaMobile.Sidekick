@@ -35,6 +35,7 @@ function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
     candidate: null,
     sending: false,
     task: null,
+    latestReview: null,
     terminal: { running: true, error: null },
     autoSend: null,
     ...over,
@@ -104,15 +105,31 @@ describe('development pane UI', () => {
     expect(a.setEffort).toHaveBeenLastCalledWith('a', null);
   });
 
-  it('effort cannot change while a Claude task runs', () => {
-    render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
-    expect((host.querySelector('select.effort-select') as HTMLSelectElement).disabled).toBe(true);
+  it('while a task runs only STOP reflects it: model, effort, Clear and Copy stay usable', () => {
+    const a = render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
+    expect(buttonLabels()).toContain('Stop');
+    expect((host.querySelector('select.effort-select') as HTMLSelectElement).disabled).toBe(false);
+    const byText = (t: string) => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === t) as HTMLButtonElement;
+    expect(byText('Sonnet').disabled).toBe(false);
+    act(() => byText('Sonnet').click());
+    expect(a.setModel).toHaveBeenCalledWith('a', 'sonnet'); // applied to the next turn by the main process
+    expect(byText('Clear').disabled).toBe(false);
+    expect(byText('Copy').disabled).toBe(false);
   });
 
-  it('Clear runs /clear for the active Workspace', () => {
-    const a = render([ws('a')], 'a');
+  it('STOP is not shown once the task is no longer active', () => {
+    for (const status of ['review_pending', 'succeeded', 'cancelled', 'failed'] as const) {
+      render([ws('a', { task: { status } as WorkspaceView['task'] })], 'a');
+      expect(buttonLabels()).not.toContain('Stop');
+    }
+  });
+
+  it('Clear only clears the terminal view: it never cancels the task or touches the session', () => {
+    const a = render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
     act(() => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Clear') as HTMLButtonElement).click());
     expect(a.clearTerminal).toHaveBeenCalledWith('a');
+    expect(a.cancelTask).not.toHaveBeenCalled();
+    expect(a.resetSession).not.toHaveBeenCalled();
   });
 
   it('Copy copies the last response through the app (never /copy in the terminal), even while a task runs', () => {

@@ -51,6 +51,12 @@ export function ensureTerminal(workspaceId: string, host: HTMLElement): Instance
   return inst;
 }
 
+/** Clears the visible screen and scrollback only; nothing is sent to the PTY. */
+export function clearTerminalView(workspaceId: string): void {
+  instances.get(workspaceId)?.term.clear();
+  void api.terminalClearView(workspaceId);
+}
+
 export function terminalData(workspaceId: string, data: string): void {
   const inst = instances.get(workspaceId);
   // Main->renderer IPC is ordered: anything received before the snapshot reply is already in the snapshot.

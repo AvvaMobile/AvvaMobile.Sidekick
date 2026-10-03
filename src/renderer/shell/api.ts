@@ -42,6 +42,8 @@ export interface WorkspaceApi {
   copyResponse(id: string, target: CopyTarget): Promise<Result<{ kind: CopyKind }> | { ok: false; code: 'choose'; blocks: BlockInfo[] }>;
   terminalInput(id: string, data: string): void;
   terminalResize(id: string, cols: number, rows: number): void;
+  /** Empties the terminal's stored output (the visible screen is cleared by the renderer). */
+  terminalClearView(id: string): Promise<void>;
   terminalRestart(id: string): Promise<void>;
   setSplit(id: string, ratio: number, commit: boolean): void;
   /** State of the round relay buttons drawn by the divider overlay. */

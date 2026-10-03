@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('workspace', {
   terminalInput: (id: string, data: string) => ipcRenderer.send('terminal:input', { workspaceId: str(id), data: str(data) }),
   terminalResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.send('terminal:resize', { workspaceId: str(id), cols: Math.floor(Number(cols)), rows: Math.floor(Number(rows)) }),
+  terminalClearView: (id: string) => ipcRenderer.invoke('terminal:clear-view', str(id)),
   terminalRestart: (id: string) => ipcRenderer.invoke('terminal:restart', str(id)),
   setRelayState: (state: unknown) => ipcRenderer.send('relay:set-state', state),
   openCoffee: () => ipcRenderer.invoke('app:open-coffee'),
