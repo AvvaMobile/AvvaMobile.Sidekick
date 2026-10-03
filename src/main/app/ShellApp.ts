@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -32,6 +33,7 @@ import { ChatGPTAdapter, MAX_PROMPT_CHARS } from '../chatgpt/ChatGPTAdapter';
 import { InteractiveClaudeRunner } from '../claude/InteractiveClaudeRunner';
 import { isClaudeSessionId, launchCommand, loginShellEnv, resolveClaudeExecutable } from '../claude/ClaudeRunner';
 import { StopHookChannel, hookSettings } from '../claude/StopHookChannel';
+import { ResponseCopier } from './ResponseCopier';
 import { DevelopmentPaneRegistry } from '../development/DevelopmentPane';
 import { createDiagnosticsLog } from '../diagnostics/diagnosticsLog';
 import { GitEvidence } from '../git/GitEvidence';
@@ -67,6 +69,7 @@ const LOGIN_CHECK_EVERY = 5;
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 
+const isCopyBlock = (v: unknown): v is { block: number } => typeof v === 'object' && v !== null && typeof (v as { block?: unknown }).block === 'number';
 const isId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(v);
 
 /**
@@ -79,6 +82,13 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   const store = new AppStateStore(join(userData, 'workspace-state.json'));
   const panes = new DevelopmentPaneRegistry();
   const stopHooks = new StopHookChannel(join(userData, 'hook-events'));
+  const responses = new ResponseCopier(clipboard, (p) => {
+    try {
+      return readFileSync(p, 'utf8');
+    } catch {
+      return null;
+    }
+  });
   const icons = new WorkspaceIcons(join(userData, 'icons'));
   const chats = new Map<string, ChatRuntime>();
   let defaultModel: ModelChoice | null = null;
@@ -372,7 +382,10 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   function createRuntime(w: WorkspaceRecord, sw: ShellWindow): void {
     orchestrator.register(w.id);
     // The user's own Claude turns (typed in the terminal) also end the flow's Claude side.
-    stopHooks.onStop(w.id, () => orchestrator.observeClaudeStop(w.id));
+    stopHooks.onStop(w.id, (e) => {
+      responses.record(w.id, e);
+      orchestrator.observeClaudeStop(w.id);
+    });
     const view = createChatGptView(
       {
         onPermission: (e) => diag(`[${w.id.slice(0, 8)}] permission ${e.kind} ${e.permission} ${e.origin} -> ${e.allowed ? 'ALLOW' : 'DENY'} (${e.reason})`),
@@ -414,6 +427,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     orchestrator.unregister(id);
     pty.stop(id);
     stopHooks.close(id);
+    responses.forget(id);
     if (c) {
       if (sw && !sw.win.isDestroyed()) sw.win.contentView.removeChildView(c.view);
       c.view.webContents.close();
@@ -831,6 +845,12 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   handle('handoff:cancel-auto', (id) => (known(id) ? orchestrator.cancelAutoSendRequest(id) : { ok: false }));
   handle('task:cancel', (id) => (known(id) ? orchestrator.cancelTask(id) : { ok: false }));
   handle('session:reset', (id) => (known(id) ? orchestrator.resetSession(id) : { ok: false }));
+  // Copy of Claude's last response: clipboard only, never touches the PTY, the session or a running task.
+  handle('response:info', (id) => (known(id) ? responses.info(id) : { available: false, blocks: [] }));
+  handle('response:copy', (id, target) => {
+    const t = target === 'auto' || target === 'full' ? target : isCopyBlock(target) ? { block: target.block } : null;
+    return known(id) && t ? responses.copy(id, t) : { ok: false, code: 'invalid', detail: '' };
+  });
   handle('review:send', (id, taskId) => (known(id) && isId(taskId) ? orchestrator.sendReview(id, taskId) : { ok: false, code: 'invalid', detail: '' }));
   handle('terminal:restart', (id) => {
     if (known(id)) pty.restart(id);

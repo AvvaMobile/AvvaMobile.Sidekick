@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceView } from '../../../shared/state';
+import type { DevPaneActions } from '../components/DevPane';
 
 vi.mock('../terminals', () => ({ ensureTerminal: vi.fn(), showTerminal: vi.fn(), fitTerminal: vi.fn(), terminalData: vi.fn(), disposeTerminal: vi.fn() }));
 
@@ -52,7 +53,8 @@ const actions = () => ({
   setModel: vi.fn(),
   setEffort: vi.fn(),
   clearTerminal: vi.fn(),
-  copyTerminal: vi.fn(),
+  responseInfo: vi.fn(async () => ({ available: true, blocks: [] })),
+  copyResponse: vi.fn<DevPaneActions['copyResponse']>(async () => ({ ok: true })),
 });
 const diag = { state: vi.fn(), capture: vi.fn(), latestUser: vi.fn(), micStatus: vi.fn(), home: vi.fn(), submit: vi.fn(), insert: vi.fn() };
 
@@ -113,10 +115,28 @@ describe('development pane UI', () => {
     expect(a.clearTerminal).toHaveBeenCalledWith('a');
   });
 
-  it('Copy runs /copy for the active Workspace', () => {
-    const a = render([ws('a')], 'a');
+  it('Copy copies the last response through the app (never /copy in the terminal), even while a task runs', () => {
+    const a = render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
     act(() => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Copy') as HTMLButtonElement).click());
-    expect(a.copyTerminal).toHaveBeenCalledWith('a');
+    expect(a.copyResponse).toHaveBeenCalledWith('a', 'auto');
+    expect(a).not.toHaveProperty('copyTerminal');
+  });
+
+  it('several code blocks open a selection menu; picking one copies that block, "Full response" copies all', async () => {
+    const a = render([ws('a')], 'a');
+    a.copyResponse.mockResolvedValueOnce({ ok: false, blocks: [{ language: 'bash', preview: 'ls' }, { language: null, preview: 'x' }] });
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Copy') as HTMLButtonElement).click());
+    expect(buttonLabels()).toEqual(expect.arrayContaining(['Code block 1 — bash', 'Code block 2', 'Full response']));
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Code block 2') as HTMLButtonElement).click());
+    expect(a.copyResponse).toHaveBeenLastCalledWith('a', { block: 1 });
+    expect(buttonLabels()).not.toContain('Full response');
+  });
+
+  it('the ▾ option copies the full response when there is a single block', async () => {
+    const a = render([ws('a')], 'a');
+    await act(async () => (host.querySelector('button[aria-label="More copy options"]') as HTMLButtonElement).click());
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Copy full response') as HTMLButtonElement).click());
+    expect(a.copyResponse).toHaveBeenLastCalledWith('a', 'full');
   });
 
   it('debug controls are hidden in normal mode', () => {

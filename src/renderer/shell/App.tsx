@@ -64,7 +64,7 @@ export function App({ api }: { api: WorkspaceApi }) {
   const toast = useCallback((t: Omit<ToastMessage, 'id'>) => {
     const id = `${Date.now()}-${Math.random()}`;
     setToasts((ts) => [...ts.slice(-3), { ...t, id }]);
-    setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), t.kind === 'error' ? 12_000 : 8_000);
+    setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), t.kind === 'error' ? 12_000 : t.kind === 'success' && !t.body ? 2_500 : 8_000);
   }, []);
 
   useEffect(() => {
@@ -134,7 +134,13 @@ export function App({ api }: { api: WorkspaceApi }) {
         }),
       restartTerminal: (id) => void api.terminalRestart(id),
       clearTerminal: (id) => api.terminalInput(id, '/clear\r'),
-      copyTerminal: (id) => api.terminalInput(id, '/copy\r'),
+      responseInfo: (id) => api.responseInfo(id),
+      copyResponse: async (id, target) => {
+        const r = await api.copyResponse(id, target);
+        if (r.ok) toast({ workspaceId: id, kind: 'success', title: r.kind === 'code' ? 'Code copied' : 'Response copied', body: '' });
+        else if (r.code !== 'choose') toast({ workspaceId: id, kind: 'error', title: 'Nothing copied', body: ('detail' in r && r.detail) || 'Copy failed.' });
+        return r.ok ? { ok: true } : r.code === 'choose' && 'blocks' in r ? { ok: false, blocks: r.blocks } : { ok: false };
+      },
       setModel: (id, model) =>
         void api.setModel(id, model).then((r) => {
           if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Model not changed', body: r.detail ?? '' });

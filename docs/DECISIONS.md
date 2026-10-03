@@ -323,3 +323,11 @@ The `AvvaMobile/AvvaMobile.Sidekick` repository is public and licensed under MIT
 
 Reason:
 Users install and update from public releases built from public source, so they can verify what they run.
+
+## D040 - Copy uses Claude's final response, not the terminal
+
+Decision:
+The development pane's Copy copies from the last completed Claude response of the Workspace (Stop hook `last_assistant_message`, transcript fallback), kept in memory by `ResponseCopier` and written to the clipboard by the main process. Fenced Markdown blocks (backtick/tilde, CommonMark closing rules, list indentation stripped) are parsed from that raw text (`src/domain/response/codeBlocks.ts`): one block → its body only (no fences, label or prose); several → a menu (Code block N — language, Full response); none → the full response; ▾ always offers "Copy full response". Copy never writes `/copy` to the terminal, never scrapes terminal output and works while a task runs.
+
+Reason:
+Terminal text carries renderer decorations and wrapping, so selecting code there is unreliable. The raw response keeps the fences and language labels exactly (verified from the transcript).

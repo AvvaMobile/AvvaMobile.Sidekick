@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EFFORT_CHOICES, EFFORT_LABELS, isEffortChoice, MODEL_CHOICES, type EffortChoice, type ModelChoice } from '../../../shared/models';
+import type { BlockInfo, CopyTarget } from '../../../shared/response';
 import type { WorkspaceView } from '../../../shared/state';
 import { shortPath } from '../viewModel';
 import { DiagnosticsPanel, type DiagnosticsApi } from './DiagnosticsPanel';
@@ -18,8 +19,10 @@ export interface DevPaneActions {
   setEffort(id: string, effort: EffortChoice | null): void;
   /** Runs Claude Code's /clear in the terminal. */
   clearTerminal(id: string): void;
-  /** Runs Claude Code's /copy in the terminal (copies the last response). */
-  copyTerminal(id: string): void;
+  /** Code blocks of Claude's last completed response (labels for the Copy menu). */
+  responseInfo(id: string): Promise<{ available: boolean; blocks: BlockInfo[] }>;
+  /** Copies part of the last response to the clipboard (main process); `blocks` set = the user must pick one. */
+  copyResponse(id: string, target: CopyTarget): Promise<{ ok: boolean; blocks?: BlockInfo[] }>;
 }
 
 interface Props {
@@ -37,6 +40,8 @@ interface Props {
 export function DevPane({ workspaces, active, debugMode, actions, diagnostics }: Props) {
   const [showDiag, setShowDiag] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  /** Copy menu: the code blocks to choose from (`null` = closed). */
+  const [copyChoices, setCopyChoices] = useState<BlockInfo[] | null>(null);
   useEffect(() => {
     if (!debugMode) setShowDiag(false);
   }, [debugMode]);
@@ -55,14 +60,57 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
           >
             Clear
           </button>
-          <button
-            className="btn"
-            disabled={!active || running || !(active?.terminal.running ?? false)}
-            title="Copy the last Claude response (/copy)"
-            onClick={() => active && actions.copyTerminal(active.id)}
-          >
-            Copy
-          </button>
+          <div className="menu-wrap copy-wrap" onMouseLeave={() => setCopyChoices(null)}>
+            <div className="seg copy-seg" role="group" aria-label="Copy Claude response">
+              <button
+                disabled={!active}
+                title="Copy the code of Claude's last response (the full response when it has no code)"
+                onClick={() => {
+                  if (!active) return;
+                  void actions.copyResponse(active.id, 'auto').then((r) => r.blocks && setCopyChoices(r.blocks));
+                }}
+              >
+                Copy
+              </button>
+              <button
+                aria-label="More copy options"
+                disabled={!active}
+                title="More copy options"
+                onClick={() => {
+                  if (!active) return;
+                  if (copyChoices) return setCopyChoices(null);
+                  void actions.responseInfo(active.id).then((i) => setCopyChoices(i.blocks.length > 1 ? i.blocks : []));
+                }}
+              >
+                ▾
+              </button>
+            </div>
+            {copyChoices && (
+              <div className="menu copy-menu">
+                {copyChoices.map((b, i) => (
+                  <button
+                    key={i}
+                    title={b.preview}
+                    onClick={() => {
+                      setCopyChoices(null);
+                      if (active) void actions.copyResponse(active.id, { block: i });
+                    }}
+                  >
+                    Code block {i + 1}
+                    {b.language ? ` — ${b.language}` : ''}
+                  </button>
+                ))}
+                <button
+                  onClick={() => {
+                    setCopyChoices(null);
+                    if (active) void actions.copyResponse(active.id, 'full');
+                  }}
+                >
+                  {copyChoices.length > 1 ? 'Full response' : 'Copy full response'}
+                </button>
+              </div>
+            )}
+          </div>
           <div className="seg model-seg" role="group" aria-label="Claude model">
             {MODEL_CHOICES.map((m) => (
               <button

@@ -1,4 +1,5 @@
 import type { AppSettings, AppSettingsPatch, ProjectSettings, ProjectSettingsPatch, SettingsTarget } from '../../shared/settings';
+import type { BlockInfo, CopyKind, CopyTarget } from '../../shared/response';
 import type { MicrophoneStatus, SetupCheck, SetupLink } from '../../shared/setup';
 import type { RelayState, ShellCommand, ShellState, ToastMessage } from '../../shared/state';
 
@@ -35,6 +36,10 @@ export interface WorkspaceApi {
   cancelTask(id: string): Promise<Result>;
   resetSession(id: string): Promise<Result>;
   sendReview(id: string, taskId: string): Promise<Result>;
+  /** Code blocks of Claude's last completed response (for the Copy menu). */
+  responseInfo(id: string): Promise<{ available: boolean; blocks: BlockInfo[] }>;
+  /** Copies part of Claude's last response to the clipboard; `code: 'choose'` lists the blocks to pick from. */
+  copyResponse(id: string, target: CopyTarget): Promise<Result<{ kind: CopyKind }> | { ok: false; code: 'choose'; blocks: BlockInfo[] }>;
   terminalInput(id: string, data: string): void;
   terminalResize(id: string, cols: number, rows: number): void;
   terminalRestart(id: string): Promise<void>;

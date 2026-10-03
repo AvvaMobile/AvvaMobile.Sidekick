@@ -104,6 +104,8 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .effort-select { border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--text); padding: 6px 8px; font-size: 13px; cursor: pointer; }
 .effort-select:disabled { opacity: .45; cursor: default; }
 .menu-wrap { position: relative; }
+.copy-menu { right: auto; left: 0; top: 100%; }
+.copy-seg button:last-child { padding: 0 6px; }
 .menu { position: absolute; right: 0; top: 28px; z-index: 5; background: var(--pane-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px; min-width: 190px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
 .menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 6px 10px; border-radius: 5px; cursor: pointer; }
 .menu button:hover:not(:disabled) { background: #2f343c; }
