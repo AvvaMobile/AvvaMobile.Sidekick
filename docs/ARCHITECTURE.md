@@ -95,7 +95,7 @@ Sidekick does not implement speech recognition; ChatGPT's own voice mode runs in
 
 ## 8. Claude execution (D033)
 
-The right-hand terminal of every Workspace runs the user's own interactive `claude` in a node-pty PTY in the project folder, started as `claude --settings <hook settings> [--model …] [--resume <session>]`. The `--settings` file only adds Sidekick's hooks; the user's own settings, permissions and status line apply unchanged. No permission-skipping flags are ever passed.
+The right-hand terminal of every Workspace runs the user's own interactive `claude` in a node-pty PTY in the project folder, started as `claude --settings <hook settings> [--model …] [--effort …] [--resume <session>]` (model and effort come from the development pane shortcuts; changing either relaunches Claude Code in the same session). The `--settings` file only adds Sidekick's hooks; the user's own settings, permissions and status line apply unchanged. No permission-skipping flags are ever passed.
 
 `InteractiveClaudeRunner` (`src/main/claude/InteractiveClaudeRunner.ts`) runs a managed task:
 

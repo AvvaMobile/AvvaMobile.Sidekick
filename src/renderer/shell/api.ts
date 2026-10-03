@@ -18,6 +18,8 @@ export interface WorkspaceApi {
   removeWorkspace(id: string): Promise<Result>;
   closeWorkspace(id: string): Promise<Result>;
   setModel(id: string, model: string): Promise<Result>;
+  /** null = Claude Code's default effort. */
+  setEffort(id: string, effort: string | null): Promise<Result>;
   openWorkspace(id: string): Promise<Result>;
   projectContextMenu(id: string): Promise<void>;
   getProjectSettings(id: string): Promise<ProjectSettings | null>;

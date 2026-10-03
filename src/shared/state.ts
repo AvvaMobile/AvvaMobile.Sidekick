@@ -1,4 +1,4 @@
-import type { ModelChoice } from './models';
+import type { EffortChoice, ModelChoice } from './models';
 /**
  * Serializable view state shared by the main process and the trusted shell renderer.
  * Everything here is keyed by workspaceId; the renderer never receives another Workspace's
@@ -74,6 +74,8 @@ export interface WorkspaceView {
   claudeSessionId: string | null;
   /** Model of the terminal's Claude Code (the explicit choice, else the default from the user's settings). */
   model: ModelChoice | null;
+  /** Effort level of the terminal's Claude Code (the explicit choice; null = Claude Code's own default). */
+  effort: EffortChoice | null;
   splitRatio: number;
   attention: AttentionState;
   chatgpt: { generating: boolean; loggedIn: boolean | null };

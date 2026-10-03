@@ -508,6 +508,7 @@ export class WorkspaceOrchestrator {
       iconUrl: this.deps.iconFor?.(ws.id) ?? null,
       claudeSessionId: ws.claudeSessionId,
       model: ws.model ?? this.deps.defaultModel?.() ?? null,
+      effort: ws.effort ?? null,
       splitRatio: this.deps.store.getSplitRatio(ws.id),
       attention: rt.attention,
       chatgpt: { generating: rt.generating, loggedIn: rt.loggedIn },

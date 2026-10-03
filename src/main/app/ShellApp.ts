@@ -22,7 +22,7 @@ import { pathToFileURL } from 'node:url';
 import * as nodePty from 'node-pty';
 import { autoUpdater } from 'electron-updater';
 import { DEFAULT_SPLIT_RATIO, isValidSplitRatio, type SplitGeometry } from '../../domain/layout/splitPane';
-import { isModelChoice, parseDefaultModel, type ModelChoice } from '../../shared/models';
+import { isEffortChoice, isModelChoice, parseDefaultModel, type ModelChoice } from '../../shared/models';
 import { colorForName, initialFor, isOpen, validateWorkspaceName, type WorkspaceRecord } from '../../domain/workspace/workspace';
 import type { AppSettings, ProjectSettings, SettingsTarget } from '../../shared/settings';
 import { isSetupLink, SETUP_LINKS, type SetupCheck } from '../../shared/setup';
@@ -281,6 +281,8 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       const exe = resolveClaudeExecutable(env);
       if (!exe) return { error: 'Claude Code executable not found (install Claude Code or set SIDEKICK_CLAUDE_PATH)' };
       const model = store.workspace(id)?.model ?? null;
+      // Validated again here: on Windows the value ends up on a verbatim cmd.exe command line.
+      const effort = store.workspace(id)?.effort;
       const stored = fresh ? null : (store.workspace(id)?.claudeSessionId ?? null);
       // Only a real session id reaches the (Windows: cmd.exe) command line.
       const sessionId = isClaudeSessionId(stored) ? stored : null;
@@ -290,7 +292,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       } catch (err) {
         return { error: `Could not install the Claude hook: ${err instanceof Error ? err.message : String(err)}` };
       }
-      const launch = launchCommand(exe, ['--settings', settings, ...(model ? ['--model', model] : []), ...(sessionId ? ['--resume', sessionId] : [])]);
+      const launch = launchCommand(exe, ['--settings', settings, ...(model ? ['--model', model] : []), ...(isEffortChoice(effort) ? ['--effort', effort] : []), ...(sessionId ? ['--resume', sessionId] : [])]);
       return {
         file: launch.file,
         // node-pty takes a verbatim Windows command line as a single string.
@@ -703,6 +705,19 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     // The shortcut picks a model explicitly; picking the current effective model changes nothing.
     if ((store.workspace(id)!.model ?? defaultModel) === model) return { ok: true };
     return applyModel(id, model);
+  });
+  // Effort shortcut (null = Claude Code's default): relaunch with --effort, resuming the same session.
+  handle('workspace:set-effort', (id, effort) => {
+    if (!known(id) || (effort !== null && !isEffortChoice(effort))) return { ok: false };
+    if ((store.workspace(id)!.effort ?? null) === effort) return { ok: true };
+    if (taskActive(id)) return { ok: false, detail: 'Claude is running a task in this project. Change the effort after it finishes.' };
+    store.updateWorkspace(id, { effort });
+    if (pty.isRunning(id)) {
+      panes.writeOutput(id, 'pty', `\r\n\x1b[2m[Switching to ${effort ?? 'the default'} effort…]\x1b[0m\r\n`);
+      pty.relaunch(id);
+    }
+    broadcast();
+    return { ok: true };
   });
 
   // ---------- Project Settings (tab right-click → Settings…) ----------

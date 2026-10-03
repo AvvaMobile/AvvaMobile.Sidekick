@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('workspace', {
   removeWorkspace: (id: string) => ipcRenderer.invoke('workspace:remove', str(id)),
   closeWorkspace: (id: string) => ipcRenderer.invoke('workspace:close', str(id)),
   setModel: (id: string, model: string) => ipcRenderer.invoke('workspace:set-model', str(id), str(model)),
+  setEffort: (id: string, effort: string | null) => ipcRenderer.invoke('workspace:set-effort', str(id), effort === null ? null : str(effort)),
   openWorkspace: (id: string) => ipcRenderer.invoke('workspace:open', str(id)),
   projectContextMenu: (id: string) => ipcRenderer.invoke('project:context-menu', str(id)),
   getProjectSettings: (id: string) => ipcRenderer.invoke('workspace:get-settings', str(id)),
