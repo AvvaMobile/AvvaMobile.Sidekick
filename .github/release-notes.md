@@ -1,11 +1,10 @@
-## Hangi dosyayı indirmeliyim?
+## Which file should I download?
 
-| Cihaz | Dosya |
+| Device | Download |
 |---|---|
-| Mac, Apple Silicon (M1 ve sonrası) | `Avva-Mobile-Sidekick-<sürüm>-arm64.dmg` |
-| Mac, Intel işlemci | `Avva-Mobile-Sidekick-<sürüm>-x64.dmg` |
-| Windows | `Avva-Mobile-Sidekick-Setup-<sürüm>.exe` |
+| Mac, Apple Silicon (M1 or later) | [Avva-Mobile-Sidekick-__VERSION__-arm64.dmg](https://github.com/AvvaMobile/AvvaMobile.Sidekick/releases/download/v__VERSION__/Avva-Mobile-Sidekick-__VERSION__-arm64.dmg) |
+| Mac, Intel processor | [Avva-Mobile-Sidekick-__VERSION__-x64.dmg](https://github.com/AvvaMobile/AvvaMobile.Sidekick/releases/download/v__VERSION__/Avva-Mobile-Sidekick-__VERSION__-x64.dmg) |
+| Windows | [Avva-Mobile-Sidekick-Setup-__VERSION__.exe](https://github.com/AvvaMobile/AvvaMobile.Sidekick/releases/download/v__VERSION__/Avva-Mobile-Sidekick-Setup-__VERSION__.exe) |
 
-`.zip` ve `.blockmap` dosyaları otomatik güncelleme içindir, indirmenize gerek yok.
-Mac modelinizi  menüsü → "Bu Mac Hakkında" bölümünden öğrenebilirsiniz.
-
+The `.zip` and `.blockmap` files are used for automatic updates. You don't need to download them.
+Not sure which Mac you have? Open the  menu → "About This Mac" and check the chip: "Apple M…" means Apple Silicon, "Intel" means Intel.
