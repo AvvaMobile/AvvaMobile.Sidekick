@@ -33,7 +33,7 @@ code, pre { font-family: 'SF Mono', Menlo, ui-monospace, monospace; }
 .resizing, .resizing * { cursor: col-resize !important; user-select: none !important; }
 
 /* Tab strip */
-.topbar { position: absolute; left: 0; right: 0; top: 0; height: 44px; display: flex; align-items: flex-end; gap: 8px; padding: 0 10px 0 108px; -webkit-app-region: drag; border-bottom: 1px solid var(--chrome-border); background: var(--chrome-bg); color: var(--chrome-text); }
+.topbar { position: absolute; left: 0; right: 0; top: 0; height: 44px; display: flex; align-items: flex-end; gap: 8px; padding: 0 10px 0 108px; -webkit-app-region: drag; border-bottom: 1px solid var(--chrome-border); background: #e8e8ea; color: var(--chrome-text); }
 .shell.fullscreen .topbar { padding-left: 8px; }
 /* Windows: no traffic lights; the caption-button overlay (min/max/close) covers the strip's right end. */
 html.platform-win32 .topbar { padding: 0 140px 0 8px; }
@@ -43,8 +43,10 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .tab-list { display: flex; align-items: flex-end; gap: 4px; overflow-x: auto; overflow-y: hidden; padding: 6px 2px 0; scrollbar-width: none; }
 .tab-list::-webkit-scrollbar { display: none; }
 .tab { position: relative; flex: 0 0 150px; width: 150px; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: none; border-radius: 9px 9px 0 0; background: transparent; color: var(--chrome-muted); cursor: pointer; font-weight: 500; touch-action: none; user-select: none; transition: background .12s, color .12s; }
-.tab:hover { background: #eeeeee; color: var(--chrome-text); }
-.tab.active { background: var(--chrome-topbar); color: var(--chrome-text); font-weight: 600; box-shadow: 0 1px 0 var(--chrome-topbar), 0 0 0 1px var(--chrome-border); clip-path: inset(-2px -2px 0 -2px); }
+.tab:hover { background: #dcdcdf; color: var(--chrome-text); }
+.tab:not(.active)::after { content: ''; position: absolute; right: -3px; top: 9px; bottom: 9px; width: 1px; background: #c4c4c8; pointer-events: none; }
+.tab:hover::after, .tab:has(+ .tab:hover)::after, .tab:has(+ .tab.active)::after, .tab:last-child::after { opacity: 0; }
+.tab.active { background: var(--chrome-topbar); color: var(--chrome-text); font-weight: 600; box-shadow: 0 1px 0 var(--chrome-topbar), 0 0 0 1px var(--chrome-border), inset 0 2px 0 var(--accent); clip-path: inset(-2px -2px 0 -2px); }
 .tab-name { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-dot { flex: none; width: 10px; height: 10px; border-radius: 3px; }
 .tab-img { flex: none; width: 16px; height: 16px; object-fit: contain; pointer-events: none; }
@@ -63,7 +65,7 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .tab-list.reordering .tab.dragging.dropping { transition: transform 150ms ease-out, box-shadow 150ms; box-shadow: none; }
 @media (prefers-reduced-motion: reduce) { .tab-list.reordering .tab { transition: none !important; } }
 .tab-add { flex: none; align-self: center; margin-bottom: 4px; width: 28px; height: 28px; border-radius: 8px; border: none; background: transparent; color: var(--chrome-muted); font-size: 20px; line-height: 1; cursor: pointer; }
-.tab-add:hover { background: #eeeeee; color: var(--chrome-text); }
+.tab-add:hover { background: #dcdcdf; color: var(--chrome-text); }
 
 .chat-placeholder { position: absolute; display: grid; place-items: center; color: var(--chrome-muted); background: #ffffff; }
 .splitter { position: absolute; cursor: col-resize; background: var(--bg); touch-action: none; z-index: 2; }
