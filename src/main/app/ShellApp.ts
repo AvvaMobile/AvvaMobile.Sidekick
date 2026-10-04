@@ -303,7 +303,9 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       } catch (err) {
         return { error: `Could not install the Claude hook: ${err instanceof Error ? err.message : String(err)}` };
       }
-      const launch = launchCommand(exe, ['--settings', settings, ...(model ? ['--model', model] : []), ...(isEffortChoice(effort) ? ['--effort', effort] : []), ...(sessionId ? ['--resume', sessionId] : [])]);
+      // Session name = project name (what `/rename` would set); `%` and `"` are dropped for the Windows command line.
+      const sessionName = (store.workspace(id)?.name ?? '').replace(/[%"\p{Cc}]/gu, '').trim();
+      const launch = launchCommand(exe, ['--settings', settings, ...(sessionName ? ['--name', sessionName] : []), ...(model ? ['--model', model] : []), ...(isEffortChoice(effort) ? ['--effort', effort] : []), ...(sessionId ? ['--resume', sessionId] : [])]);
       return {
         file: launch.file,
         // node-pty takes a verbatim Windows command line as a single string.
