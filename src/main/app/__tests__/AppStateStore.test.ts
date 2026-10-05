@@ -2,7 +2,6 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_PROMPT_SUFFIX } from '../../../domain/handoff/promptSuffix';
 import { DEFAULT_SPLIT_RATIO } from '../../../domain/layout/splitPane';
 import { newTask } from '../../../domain/task/task';
 import type { WorkspaceRecord } from '../../../domain/workspace/workspace';
@@ -156,17 +155,6 @@ describe('AppStateStore', () => {
     expect(s.get().workspaces).toEqual([]);
     expect(readdirSync(join(file, '..')).some((f) => f.includes('corrupt'))).toBe(true);
   });
-  it('auto-send preference defaults on, persists, and older files without preferences read as on', () => {
-    const file = tmpFile();
-    const s = new AppStateStore(file, 0);
-    expect(s.preferences().autoSendOnRequest).toBe(true);
-    s.setPreferences({ autoSendOnRequest: false });
-    expect(new AppStateStore(file, 0).preferences().autoSendOnRequest).toBe(false);
-    const old = tmpFile();
-    writeFileSync(old, JSON.stringify({ schemaVersion: 1, workspaces: [], tasks: [], reviewPackets: [], activeWorkspaceId: null }));
-    expect(new AppStateStore(old, 0).preferences().autoSendOnRequest).toBe(true);
-  });
-
   it('a failed save is logged and retried later instead of throwing', () => {
     vi.useFakeTimers();
     try {
@@ -188,24 +176,5 @@ describe('AppStateStore', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  describe('claudePromptSuffix preference', () => {
-    it('defaults, survives a restart, and an empty value stays empty', () => {
-      const file = tmpFile();
-      const s = new AppStateStore(file, 0);
-      expect(s.preferences().claudePromptSuffix).toBe(DEFAULT_PROMPT_SUFFIX);
-      s.setPreferences({ claudePromptSuffix: 'mine\nline 2' });
-      expect(new AppStateStore(file, 0).preferences().claudePromptSuffix).toBe('mine\nline 2');
-      s.setPreferences({ claudePromptSuffix: '' });
-      expect(new AppStateStore(file, 0).preferences().claudePromptSuffix).toBe('');
-    });
-
-    it('an older state file without the field loads with the default and keeps other preferences', () => {
-      const file = tmpFile();
-      writeFileSync(file, JSON.stringify({ schemaVersion: 1, workspaces: [], tasks: [], reviewPackets: [], activeWorkspaceId: null, preferences: { autoSendOnRequest: false, coffeePromptShown: true, setupPromptShown: true } }));
-      const p = new AppStateStore(file, 0).preferences();
-      expect(p).toMatchObject({ autoSendOnRequest: false, coffeePromptShown: true, claudePromptSuffix: DEFAULT_PROMPT_SUFFIX });
-    });
   });
 });

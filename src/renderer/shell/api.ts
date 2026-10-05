@@ -32,9 +32,6 @@ export interface WorkspaceApi {
   getAppSettings(): Promise<AppSettings>;
   updateAppSettings(patch: AppSettingsPatch): Promise<Result<{ settings: AppSettings }>>;
   revealUserData(): Promise<void>;
-  sendToClaude(id: string): Promise<Result<{ taskId: string }>>;
-  /** Cancels the user-requested auto-send countdown (D034). */
-  cancelAutoSend(id: string): Promise<Result>;
   cancelTask(id: string): Promise<Result>;
   resetSession(id: string): Promise<Result>;
   /** Retries delivering the stored result to ChatGPT after an automatic delivery failed (never re-runs Claude). */
@@ -56,7 +53,7 @@ export interface WorkspaceApi {
   openSetupLink(key: SetupLink): Promise<void>;
   /** Asks for the microphone (macOS, first time) or opens the OS privacy settings; returns the new status. */
   requestMicrophone(): Promise<MicrophoneStatus>;
-  diagnostics: Record<'state' | 'capture' | 'latestUser' | 'micStatus' | 'home' | 'submit', () => Promise<unknown>> & {
+  diagnostics: Record<'state' | 'micStatus' | 'home' | 'submit', () => Promise<unknown>> & {
     insert(text: string): Promise<unknown>;
   };
   onState(cb: (s: ShellState) => void): () => void;

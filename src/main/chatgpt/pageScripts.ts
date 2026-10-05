@@ -45,9 +45,6 @@ export const SELECTORS: PageSelectors = {
   codeBlock: '[data-markdown-copy="code-block"]',
 };
 
-/** Language tag for the designated Claude Prompt fenced block: ```claude-prompt */
-export const CLAUDE_PROMPT_LANGUAGE = 'claude-prompt';
-
 export interface PageState {
   url: string;
   composerFound: boolean;
@@ -83,156 +80,6 @@ export function pageStateScript(sel: PageSelectors): PageState {
       'content-search-unit': q('[data-content-search-unit-key]'),
       textarea: q('textarea'),
     },
-  };
-}
-
-export type PromptBlockResult =
-  | {
-      ok: true;
-      text: string;
-      messageId: string | null;
-      /** 0-based index of the block within its message (multiple claude-prompt blocks: the last wins). */
-      blockIndex: number;
-      /** How many assistant messages back from the latest one the block was found (0 = latest). */
-      messagesBack: number;
-      truncated: boolean;
-      /** tagged: claude-prompt fence/label or Claude-titled writing block; boxed: D032 (any writing block / plain-text block). */
-      designation: 'tagged' | 'boxed';
-    }
-  | { ok: false; code: 'no_assistant_messages' | 'no_prompt_block' | 'still_generating'; detail: string };
-
-/**
- * Finds the most recent assistant message that contains a designated Claude Prompt block and
- * returns only that block's text. A block is designated when:
- *   - its code language is `claude-prompt` (``` claude-prompt fence), or
- *   - its rendered header label reads `claude-prompt`, or
- *   - it is a ChatGPT writing block whose title mentions Claude (e.g. "Claude test prompt") —
- *     what ChatGPT produces when asked for "a prompt for Claude" in the 2026 UI.
- * Otherwise (D032) the message's last "box" is used: any writing block (whatever its title) or a
- * plain-text/markdown/unlabeled code block. Code in other languages (bash, ts, …) is never used.
- * Surrounding prose is never returned. The newest message containing a usable block wins.
- */
-export function latestClaudePromptBlockScript(args: {
-  sel: PageSelectors;
-  language: string;
-  maxChars: number;
-}): PromptBlockResult {
-  const { sel, language, maxChars } = args;
-  if (document.querySelector(sel.stopButton) || document.querySelector(sel.incompleteAssistant)) {
-    return { ok: false, code: 'still_generating', detail: 'ChatGPT is still generating a response' };
-  }
-  const messages = Array.from(document.querySelectorAll(sel.assistantMessage));
-  if (messages.length === 0) return { ok: false, code: 'no_assistant_messages', detail: 'no assistant messages found' };
-
-  const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
-
-  const isWritingBlock = (el: Element): boolean => el.matches(sel.writingBlock);
-  const isCodeBlock = (el: Element): boolean => el.matches(sel.codeBlock);
-
-  /** Language of a fenced block: `language-x` class, data-language or the rendered header label. */
-  const languageOf = (el: Element): string => {
-    const code = el.querySelector('code');
-    if (code) {
-      for (const cls of Array.from(code.classList)) {
-        if (cls.startsWith('language-')) return norm(cls.slice('language-'.length));
-        if (cls.startsWith('lang-')) return norm(cls.slice('lang-'.length));
-      }
-      if (code.getAttribute('data-language')) return norm(code.getAttribute('data-language'));
-    }
-    if (el.getAttribute('data-language')) return norm(el.getAttribute('data-language'));
-    if (isCodeBlock(el)) return norm(el.querySelector('[data-markdown-copy="exclude"]')?.textContent);
-    for (const l of Array.from(el.querySelectorAll('div, span'))) {
-      const t = norm(l.textContent);
-      if (l.children.length === 0 && t && t.length < 30 && !l.closest('code')) return t;
-    }
-    return '';
-  };
-
-  const isDesignated = (el: Element): boolean => {
-    if (isWritingBlock(el)) {
-      if (norm(el.getAttribute('data-language')) === language) return true;
-      const title = norm(el.querySelector('header')?.textContent);
-      return title === language || /\bclaude\b/.test(title);
-    }
-    return languageOf(el) === language;
-  };
-
-  const PLAIN = ['', 'plain text', 'plaintext', 'text', 'txt', 'markdown', 'md', 'prompt'];
-  const isBoxBlock = (el: Element): boolean => isWritingBlock(el) || PLAIN.includes(languageOf(el));
-
-  /** A writing block's markdown may itself be one fenced block (```text … ```): return its body. */
-  const unwrapFence = (md: string): string => {
-    const m = md.trim().match(/^(`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n\1\s*$/);
-    return m ? m[2]! : md;
-  };
-
-  const blockText = (el: Element): string => {
-    let raw: string;
-    if (isWritingBlock(el)) {
-      const content = el.querySelector('[data-markdown-copy-content]') as HTMLElement | null;
-      const md = el.getAttribute('data-markdown-copy-text');
-      raw = md != null ? unwrapFence(md) : (content?.innerText ?? content?.textContent ?? '');
-    } else {
-      const code = el.querySelector('code');
-      raw = (code ?? el).textContent ?? '';
-    }
-    return raw.replace(/ /g, ' ').replace(/\s+$/, '');
-  };
-
-  const messageIdOf = (msg: Element): string | null =>
-    msg.getAttribute('data-message-id') ??
-    msg.querySelector('[data-chatgpt-selection-message-id]')?.getAttribute('data-chatgpt-selection-message-id') ??
-    msg.getAttribute('data-chatgpt-search-message-ids')?.split(/\s+/)[0] ??
-    (msg.id || null);
-
-  const blockSel = 'pre, ' + sel.writingBlock + ', ' + sel.codeBlock;
-
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]!;
-    // Outermost blocks only (a <pre>/<code> inside a code-block container or writing block is the same block).
-    const blocks = Array.from(msg.querySelectorAll(blockSel)).filter((el) => !el.parentElement?.closest(blockSel));
-    let pick = -1;
-    let designation: 'tagged' | 'boxed' = 'tagged';
-    for (let b = blocks.length - 1; b >= 0 && pick < 0; b--) if (isDesignated(blocks[b]!) && blockText(blocks[b]!).trim()) pick = b;
-    if (pick < 0) {
-      designation = 'boxed';
-      for (let b = blocks.length - 1; b >= 0 && pick < 0; b--) if (isBoxBlock(blocks[b]!) && blockText(blocks[b]!).trim()) pick = b;
-    }
-    if (pick < 0) continue;
-    const full = blockText(blocks[pick]!);
-    const truncated = full.length > maxChars;
-    return {
-      ok: true,
-      text: truncated ? full.slice(0, maxChars) : full,
-      messageId: messageIdOf(msg),
-      blockIndex: pick,
-      messagesBack: messages.length - 1 - i,
-      truncated,
-      designation,
-    };
-  }
-  return { ok: false, code: 'no_prompt_block', detail: 'no ```' + language + ' block in assistant messages' };
-}
-
-export type LatestTextResult =
-  | { ok: true; text: string; messageId: string | null; truncated: boolean }
-  | { ok: false; code: 'not_found'; detail: string };
-
-/** Latest message text of a role (used for diagnostics and the voice-command path). */
-export function latestMessageTextScript(args: { selector: string; maxChars: number }): LatestTextResult {
-  const all = document.querySelectorAll(args.selector);
-  const last = all[all.length - 1];
-  if (!last) return { ok: false, code: 'not_found', detail: 'no message for selector' };
-  const text = ((last as HTMLElement).innerText ?? last.textContent ?? '').trim();
-  return {
-    ok: true,
-    text: text.slice(0, args.maxChars),
-    // 2026 UI turns carry no message id: their content-search unit key ("<thread>:<turn>:<role>") is stable.
-    messageId:
-      last.getAttribute('data-message-id') ??
-      last.closest('[data-content-search-unit-key]')?.getAttribute('data-content-search-unit-key') ??
-      (last.id || null),
-    truncated: text.length > args.maxChars,
   };
 }
 
@@ -298,127 +145,6 @@ export function clickSendScript(args: { sel: PageSelectors }): SubmitResult {
   return { ok: true, via: 'send-button' };
 }
 
-// ---------- Pre-submit interception of Sidekick commands (D045) ----------
-
-export interface InterceptedIntent {
-  /** Unique per intercepted command (page-local counter + time). */
-  id: string;
-  text: string;
-  detectedAt: string;
-}
-
-export interface IntentGuardArgs {
-  sel: PageSelectors;
-  /** Longest composer text still treated as a command; longer messages are normal chat. */
-  maxChars: number;
-  /** Production: only real user input (`isTrusted`) is intercepted; tests dispatch synthetic events. */
-  trustedOnly: boolean;
-}
-
-/** `window.__sidekickIntentGuard` lives only in this script's isolated world; the page cannot see it. */
-interface GuardState {
-  queue: InterceptedIntent[];
-  n: number;
-  enabled: boolean;
-}
-
-/**
- * Installs capture-phase listeners (Enter, send-button click, form submit) that stop a composer message
- * which is an explicit "send this to Claude" command BEFORE ChatGPT's own handlers see it, clear the
- * composer and queue the command for the main process. Anything else is untouched; every failure path
- * lets the event through (fail-open). Idempotent per document.
- *
- * `isIntent` is `isSendToClaudeRequest` (self-contained); the call is built by `intentGuardCall`.
- */
-export function installIntentGuardScript(args: IntentGuardArgs, isIntent: (text: string) => boolean): { ok: true; installed: boolean } {
-  const w = window as unknown as { __sidekickIntentGuard?: GuardState };
-  if (w.__sidekickIntentGuard) return { ok: true, installed: false };
-  const state: GuardState = { queue: [], n: 0, enabled: true };
-  w.__sidekickIntentGuard = state;
-  const sel = args.sel;
-
-  const composer = (): HTMLElement | null => (Array.from(document.querySelectorAll(sel.composer)).find((c) => !c.closest(sel.writingBlock)) ?? null) as HTMLElement | null;
-  const read = (el: HTMLElement): string => (el.tagName === 'TEXTAREA' ? (el as HTMLTextAreaElement).value : (el.innerText ?? el.textContent ?? ''));
-
-  /** Empties the composer through the editor's own input path so ChatGPT's state follows the DOM. */
-  const clear = (el: HTMLElement): void => {
-    el.focus();
-    if (el.tagName === 'TEXTAREA') {
-      const ta = el as HTMLTextAreaElement;
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      if (setter) setter.call(ta, '');
-      else ta.value = '';
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
-      return;
-    }
-    try {
-      document.execCommand('selectAll', false);
-      document.execCommand('delete', false);
-    } catch {
-      // fall through to the manual path
-    }
-    if (read(el).trim()) {
-      el.textContent = '';
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  };
-
-  /** True when the event was a Sidekick command and has been stopped. */
-  const intercept = (e: Event): boolean => {
-    try {
-      if (!state.enabled || (args.trustedOnly && !e.isTrusted)) return false;
-      const el = composer();
-      if (!el) return false;
-      const text = read(el).trim();
-      if (!text || text.length > args.maxChars || !isIntent(text)) return false;
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-      clear(el);
-      state.queue.push({ id: `${Date.now().toString(36)}-${++state.n}`, text, detectedAt: new Date().toISOString() });
-      return true;
-    } catch {
-      return false; // fail-open: ChatGPT proceeds as usual
-    }
-  };
-
-  document.addEventListener(
-    'keydown',
-    (e) => {
-      const k = e as KeyboardEvent;
-      if (k.key !== 'Enter' || k.shiftKey || k.altKey || k.isComposing || k.repeat) return;
-      const el = composer();
-      const target = e.target as Node | null;
-      if (!el || !target || !(el === target || el.contains(target))) return;
-      intercept(e);
-    },
-    true,
-  );
-  document.addEventListener(
-    'click',
-    (e) => {
-      const t = e.target as Element | null;
-      if (t && typeof t.closest === 'function' && t.closest(sel.sendButton)) intercept(e);
-    },
-    true,
-  );
-  document.addEventListener('submit', (e) => void intercept(e), true);
-  return { ok: true, installed: true };
-}
-
-export interface TakeIntentsResult {
-  installed: boolean;
-  intents: InterceptedIntent[];
-}
-
-/** Atomically takes (and clears) the queued commands; also tells the guard whether interception is currently wanted. */
-export function takeInterceptedIntentsScript(args: { enabled: boolean }): TakeIntentsResult {
-  const s = (window as unknown as { __sidekickIntentGuard?: GuardState }).__sidekickIntentGuard;
-  if (!s) return { installed: false, intents: [] };
-  s.enabled = args.enabled;
-  return { installed: true, intents: s.queue.splice(0) };
-}
-
 // ---------- "Send to Claude" button on every prompt/code block ----------
 
 export interface BlockSendRequest {
@@ -448,7 +174,7 @@ interface BlockSendGuard {
 /**
  * Injects a "Send to Claude" button right after the Copy button of every prompt/code block of the
  * assistant messages (idempotent per document; re-scans on DOM changes). A click reads the text from the
- * very block that holds the clicked button and queues it; nothing else (no stored candidate, no other block)
+ * very block that holds the clicked button and queues it; nothing else (no other block, no stored text)
  * is ever a source. Lives in the page's isolated world.
  */
 export function installBlockSendButtonsScript(args: BlockSendArgs): { ok: true; installed: boolean } {
@@ -637,11 +363,6 @@ export function setBlockSendStatusScript(args: { id: string; state: BlockSendSta
     }, 8000);
   }
   return { found: true };
-}
-
-/** Serialized install call: the guard plus the self-contained intent matcher, args JSON-encoded. */
-export function intentGuardCall(args: IntentGuardArgs, isIntent: (text: string) => boolean): PageScript<{ ok: true; installed: boolean }> {
-  return `(${installIntentGuardScript.toString()})(${JSON.stringify(args)}, ${isIntent.toString()})` as PageScript<{ ok: true; installed: boolean }>;
 }
 
 /** Serialized page-script invocation carrying its result type. */

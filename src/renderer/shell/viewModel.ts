@@ -1,32 +1,9 @@
 import type { WorkspaceView } from '../../shared/state';
 
-export type SendIndicator = 'none' | 'ready' | 'sent' | 'waiting' | 'running';
-
-export interface SendState {
-  enabled: boolean;
-  indicator: SendIndicator;
-  /** Short status next to the button. */
-  label: string;
-  /** Tooltip / reason. */
-  reason: string;
-}
-
-/** Send to Claude availability for the selected Workspace (only its own candidate counts). */
 /** Start-page search: case-insensitive match on the project name only. */
 export function filterProjects<T extends { name: string }>(projects: readonly T[], query: string): T[] {
   const q = query.trim().toLowerCase();
   return q ? projects.filter((p) => p.name.toLowerCase().includes(q)) : [...projects];
-}
-
-export function sendState(ws: WorkspaceView | null): SendState {
-  if (!ws) return { enabled: false, indicator: 'none', label: '', reason: 'No Workspace selected' };
-  const st = ws.task?.status;
-  if (st === 'queued' || st === 'running') return { enabled: false, indicator: 'running', label: 'Claude running', reason: 'A Claude task is already running in this Workspace' };
-  if (ws.sending) return { enabled: false, indicator: 'running', label: 'Sending…', reason: 'Starting Claude' };
-  if (ws.chatgpt.generating) return { enabled: false, indicator: 'waiting', label: 'ChatGPT is responding…', reason: 'Wait for ChatGPT to finish its reply' };
-  if (!ws.candidate) return { enabled: false, indicator: 'none', label: 'No prompt', reason: 'Ask ChatGPT for a ```claude-prompt block' };
-  if (ws.candidate.alreadySent) return { enabled: false, indicator: 'sent', label: 'Already run', reason: 'This prompt already ran successfully; ask ChatGPT for a new one' };
-  return { enabled: true, indicator: 'ready', label: 'Prompt ready', reason: 'Send the latest Claude Prompt block to Claude Code' };
 }
 
 export function shortPath(p: string): string {

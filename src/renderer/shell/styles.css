@@ -116,7 +116,6 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 /* Review */
 .review-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #24476e; background: #131b26; font-size: 12.5px; }
 .review-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.auto-send-why { font-weight: 400; opacity: 0.75; }
 
 /* Terminal */
 .terminal-wrap { flex: 1; min-height: 0; flex-direction: column; background: var(--term); }
@@ -269,6 +268,5 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .status-dot.delivery-failed { background: var(--err); }
 .status-dot.failed { background: var(--err); }
 .status-label { white-space: nowrap; }
-.status-hint { color: var(--muted); white-space: nowrap; }
 .status-spacer { flex: 1; }
 .review-bar.compact { border: none; background: transparent; padding: 0; }

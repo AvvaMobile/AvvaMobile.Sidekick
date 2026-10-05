@@ -21,25 +21,17 @@ The user talks with ChatGPT, normally using voice.
 
 This phase can last as many turns as required.
 
-Nothing is sent to Claude Code automatically during planning. The one exception is explicit delegation by the user: when the user's own message asks ChatGPT to send the prompt to Claude, the ready prompt is sent after a cancellable 3-second countdown (D034/D045, can be turned off in Settings).
+Nothing is sent to Claude Code during planning; only a click on a block's *Send to Claude* button delegates (D046).
 
 ### Step 3: Produce the implementation prompt
 
 The user asks ChatGPT to produce the final prompt for Claude Code.
 
-The final implementation prompt is rendered as a distinct copyable fenced/code block designated as the Claude Prompt.
-
-Sidekick captures only the most recent designated Claude Prompt block as the candidate (a ```` ```claude-prompt ```` fenced block, or a ChatGPT writing block whose title mentions Claude — D028).
-
-Recommended ChatGPT custom instruction: "When I ask for a prompt for Claude / Claude Code, put the complete prompt in a single fenced code block with the language tag `claude-prompt` and nothing else inside it."  It does not capture the full conversation or arbitrary surrounding assistant prose.
-
-The candidate remains inspectable before execution.
+The final implementation prompt is rendered by ChatGPT as a distinct copyable fenced/code block (or writing block). Sidekick injects a *Send to Claude* button right after that block's Copy button; every prompt/code block has its own.
 
 ### Step 4: Explicitly delegate
 
-The user clicks the round *Send to Claude* button on the divider (or presses ⌘⇧↵), or has asked for it in their own ChatGPT message (D034). Sidekick captures exactly the latest designated Claude Prompt block and freezes it into a Task.
-
-A visible button is always available; the user's explicit request is only a shortcut to the same action.
+The user clicks the *Send to Claude* button of the block they want to delegate. Sidekick reads the text of exactly that block (never another block, never stored text) and freezes it into a Task. The button shows *Sent to Claude ✓* only after Claude reports (`UserPromptSubmit`) that it received the prompt; otherwise it shows *Send failed — Retry* with the reason.
 
 ### Step 5: Execute with Claude Code
 
@@ -85,9 +77,7 @@ Only explicit delegation creates a task.
 
 Valid triggers:
 
-- click Send to Claude
-- keyboard shortcut assigned to Send to Claude
-- the user's own latest ChatGPT message explicitly asking to send the prompt to Claude (D034; 3-second cancellable countdown)
+- click a block's Send to Claude button
 
 Invalid triggers:
 
@@ -97,9 +87,9 @@ Invalid triggers:
 - terminal becomes idle
 - a previous task finishes
 
-## 3. Candidate prompt rules
+## 3. Prompt rules
 
-The candidate prompt is the exact assistant response chosen for delegation unless the user edits it.
+The prompt is exactly the text of the clicked block.
 
 Sidekick must not silently:
 
@@ -111,21 +101,9 @@ Sidekick must not silently:
 
 Control and escape characters are removed before the prompt is pasted, so text in a ChatGPT reply cannot type extra keys into Claude.
 
-## 4. Voice-triggered send
+## 4. Voice
 
-Voice-triggered handoff is desirable but must not be implemented as uncontrolled fuzzy matching.
-
-Implemented as D034: the latest (possibly voice-transcribed) ChatGPT user message is checked against a narrow set of explicit, imperative send phrases; negation, deferral or conditions reject it. False negatives are preferred; the button is the fallback.
-
-Since D045 such a command is stopped **before** ChatGPT submits it, so it never becomes a conversation message and ChatGPT cannot answer "I can't send to Claude":
-
-- typed or dictated composer submission (Enter, send button, form submit): intercepted;
-- ChatGPT Live Voice (server-streamed turn, no composer submit): pre-submit interception is not guaranteed; the post-submit detection above is the fallback;
-- the countdown, candidate, duplicate protection and managed task are the same for both paths.
-
-Any voice-trigger path calls the exact same orchestration command as the button.
-
-There is never a separate privileged voice execution path.
+There is no voice or text command that sends a prompt to Claude (removed, D046). ChatGPT's voice mode only helps plan; delegating is always a click on a block's button.
 
 ## 5. Claude permissions
 

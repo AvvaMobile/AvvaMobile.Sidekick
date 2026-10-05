@@ -2,7 +2,6 @@ import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { renameWithRetry } from './renameWithRetry';
 import { DEFAULT_SPLIT_RATIO, isValidSplitRatio, type SplitRatio } from '../../domain/layout/splitPane';
-import { DEFAULT_PROMPT_SUFFIX } from '../../domain/handoff/promptSuffix';
 import { isViewMode, legacyPresetRatio, legacyViewMode, type ViewMode } from '../../domain/layout/viewMode';
 import type { ReviewPacket } from '../../domain/review/reviewPacket';
 import type { TaskRecord } from '../../domain/task/task';
@@ -28,17 +27,13 @@ export interface AppState {
 }
 
 export interface Preferences {
-  /** Auto-send a ready Claude Prompt when the user asked ChatGPT to send it (D034). Default on. */
-  autoSendOnRequest: boolean;
   /** The one-time "Buy me a coffee" popup has been shown. */
   coffeePromptShown: boolean;
   /** The one-time requirements popup (D037) has been shown. */
   setupPromptShown: boolean;
-  /** Global "Append to Claude prompts" text (optional on disk; absent = default, '' = the user cleared it). */
-  claudePromptSuffix: string;
 }
 
-const defaultPreferences = (): Preferences => ({ autoSendOnRequest: true, coffeePromptShown: false, setupPromptShown: false, claudePromptSuffix: DEFAULT_PROMPT_SUFFIX });
+const defaultPreferences = (): Preferences => ({ coffeePromptShown: false, setupPromptShown: false });
 
 const empty = (): AppState => ({
   schemaVersion: APP_STATE_SCHEMA_VERSION,
@@ -242,10 +237,8 @@ export class AppStateStore implements SplitRatioStore {
         reviewPackets: Array.isArray(parsed.reviewPackets) ? parsed.reviewPackets : [],
         activeWorkspaceId: typeof parsed.activeWorkspaceId === 'string' ? parsed.activeWorkspaceId : null,
         preferences: {
-          autoSendOnRequest: parsed.preferences?.autoSendOnRequest !== false,
           coffeePromptShown: parsed.preferences?.coffeePromptShown === true,
           setupPromptShown: parsed.preferences?.setupPromptShown === true,
-          claudePromptSuffix: typeof parsed.preferences?.claudePromptSuffix === 'string' ? parsed.preferences.claudePromptSuffix : DEFAULT_PROMPT_SUFFIX,
         },
       };
       // Restart recovery (WORKFLOW §8): no child process survives a restart.

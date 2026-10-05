@@ -1,5 +1,4 @@
 import { isAbsolute } from 'node:path';
-import { MAX_PROMPT_SUFFIX_CHARS } from '../../domain/handoff/promptSuffix';
 import { validateWorkspaceName } from '../../domain/workspace/workspace';
 import { parseGithubRepository } from '../../shared/github';
 import { isModelChoice } from '../../shared/models';
@@ -11,8 +10,7 @@ export type Validated<T> = { ok: true; patch: T } | { ok: false; detail: string 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const PROJECT_KEYS = ['name', 'projectPath', 'color', 'model', 'chatConversationUrl', 'icon', 'githubRepository'] as const;
-const APP_KEYS = ['autoSendOnRequest', 'developerMode'] as const;
-const APP_STRING_KEYS = ['claudePromptSuffix'] as const;
+const APP_KEYS = ['developerMode'] as const;
 
 /**
  * Strict validation of a `workspace:update-settings` patch from the renderer. Pure except for `isDirectory`
@@ -71,14 +69,9 @@ export function validateAppSettingsPatch(raw: unknown): Validated<AppSettingsPat
   if (!isRecord(raw)) return { ok: false, detail: 'Invalid settings.' };
   const keys = Object.keys(raw);
   if (keys.length === 0) return { ok: false, detail: 'Nothing to change.' };
-  const unknown = keys.find((k) => !(APP_KEYS as readonly string[]).includes(k) && !(APP_STRING_KEYS as readonly string[]).includes(k));
+  const unknown = keys.find((k) => !(APP_KEYS as readonly string[]).includes(k));
   if (unknown) return { ok: false, detail: `Unknown setting: ${unknown.slice(0, 40)}` };
   const patch: AppSettingsPatch = {};
-  if ('claudePromptSuffix' in raw) {
-    const t = raw.claudePromptSuffix;
-    if (typeof t !== 'string' || t.length > MAX_PROMPT_SUFFIX_CHARS) return { ok: false, detail: `Text must be at most ${MAX_PROMPT_SUFFIX_CHARS} characters.` };
-    patch.claudePromptSuffix = t;
-  }
   for (const k of APP_KEYS) {
     if (!(k in raw)) continue;
     if (typeof raw[k] !== 'boolean') return { ok: false, detail: `${k} must be true or false.` };

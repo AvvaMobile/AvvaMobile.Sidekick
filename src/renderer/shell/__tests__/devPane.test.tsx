@@ -8,7 +8,6 @@ import type { DevPaneActions } from '../components/DevPane';
 vi.mock('../terminals', () => ({ ensureTerminal: vi.fn(), showTerminal: vi.fn(), fitTerminal: vi.fn(), terminalData: vi.fn(), disposeTerminal: vi.fn() }));
 
 const { DevPane } = await import('../components/DevPane');
-const { sendState } = await import('../viewModel');
 const { TabBar } = await import('../components/TabBar');
 const { StartPage } = await import('../components/StartPage');
 
@@ -32,14 +31,10 @@ function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
     splitRatio: 0.6,
     viewMode: 'split',
     attention: 'none',
-    chatgpt: { generating: false, loggedIn: true },
-    candidate: null,
-    sending: false,
+    chatgpt: { loggedIn: true },
     task: null,
     latestReview: null,
     terminal: { running: true, error: null },
-    autoSend: null,
-    autoSendNotice: null,
     ...over,
   };
 }
@@ -47,8 +42,6 @@ function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
 const DIAG_LABELS = ['Page state', 'Capture Claude Prompt', 'Latest user msg', 'Mic status', 'Home', 'Insert into composer', 'Submit'];
 
 const actions = () => ({
-  sendToClaude: vi.fn(),
-  cancelAutoSend: vi.fn(),
   cancelTask: vi.fn(),
   resetSession: vi.fn(),
   retryReview: vi.fn(),
@@ -170,36 +163,15 @@ describe('development pane UI', () => {
     const tab = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Diagnostics')!;
     act(() => tab.click());
     expect(host.querySelector('[data-testid="diagnostics"]')).not.toBeNull();
-    expect(buttonLabels()).toContain('Capture Claude Prompt');
+    expect(buttonLabels()).toContain('Page state');
   });
 
   it('the terminal is the pane (no preview dialog)', () => {
-    render([ws('a', { candidate: { text: 'do it', messageId: 'm', alreadySent: false } })], 'a');
+    render([ws('a')], 'a');
     expect(host.querySelector('[role="dialog"]')).toBeNull();
     expect(buttonLabels().some((l) => l?.startsWith('Run in Claude'))).toBe(false);
     expect((host.querySelector('.terminal-wrap') as HTMLElement).style.display).toBe('flex');
     expect(buttonLabels()).not.toContain('Claude');
-  });
-
-  it('shows a live auto-send countdown with Cancel', () => {
-    vi.useFakeTimers();
-    try {
-      const at = new Date(Date.now() + 3_000).toISOString();
-      const a = render([ws('a', { autoSend: { at } })], 'a');
-      const bar = () => host.querySelector('.auto-send-bar');
-      expect(bar()?.textContent).toContain('Sending to Claude in 3 s');
-      expect(bar()?.textContent).toContain('you asked ChatGPT to send it');
-      act(() => {
-        vi.advanceTimersByTime(1_100);
-      });
-      expect(bar()?.textContent).toContain('Sending to Claude in 2 s');
-      act(() => (Array.from(bar()!.querySelectorAll('button')).find((b) => b.textContent === 'Cancel') as HTMLButtonElement).click());
-      expect(a.cancelAutoSend).toHaveBeenCalledWith('a');
-      render([ws('a')], 'a', false, a);
-      expect(bar()).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('shows no review bar in the pane (review handback lives on the relay button)', () => {
@@ -310,17 +282,5 @@ describe('Projects start page', () => {
     expect(onCreate).toHaveBeenCalled();
     act(() => root.unmount());
     host.remove();
-  });
-});
-
-describe('sendState', () => {
-  it('disabled while running, generating or without candidate', () => {
-    const cand = { text: 'x', messageId: null, alreadySent: false };
-    expect(sendState(null).enabled).toBe(false);
-    expect(sendState(ws('a')).enabled).toBe(false);
-    expect(sendState(ws('a', { candidate: cand })).enabled).toBe(true);
-    expect(sendState(ws('a', { candidate: cand, chatgpt: { generating: true, loggedIn: true } })).enabled).toBe(false);
-    const running = { id: 't', status: 'running' as const, outcome: null, prompt: '', createdAt: '', error: null, review: null };
-    expect(sendState(ws('a', { candidate: cand, task: running })).enabled).toBe(false);
   });
 });

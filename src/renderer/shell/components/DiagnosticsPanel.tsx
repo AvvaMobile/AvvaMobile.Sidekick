@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export type DiagnosticsApi = Record<'state' | 'capture' | 'latestUser' | 'micStatus' | 'home' | 'submit', () => Promise<unknown>> & {
+export type DiagnosticsApi = Record<'state' | 'micStatus' | 'home' | 'submit', () => Promise<unknown>> & {
   insert(text: string): Promise<unknown>;
 };
 
@@ -20,8 +20,6 @@ export function DiagnosticsPanel({ api }: { api: DiagnosticsApi }) {
       <div className="diag-note">Developer → Diagnostics. Not part of the product UI.</div>
       <div className="diag-row">
         <button className="btn small" onClick={run('state', api.state)}>Page state</button>
-        <button className="btn small" onClick={run('capture', api.capture)}>Capture Claude Prompt</button>
-        <button className="btn small" onClick={run('latest user', api.latestUser)}>Latest user msg</button>
         <button className="btn small" onClick={run('mic', api.micStatus)}>Mic status</button>
         <button className="btn small" onClick={run('home', api.home)}>Home</button>
       </div>

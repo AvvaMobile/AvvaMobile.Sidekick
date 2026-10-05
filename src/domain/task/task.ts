@@ -12,7 +12,7 @@ export interface TaskRecord {
   readonly workspaceId: string;
   /** Frozen at creation (queued); never modified afterwards. */
   readonly prompt: string;
-  /** The captured ChatGPT prompt before the "Append to Claude prompts" text was added; absent on older records and when nothing was appended. */
+  /** Older versions only: the ChatGPT prompt before the "Append to Claude prompts" text was added; never set now. */
   readonly originalPrompt?: string;
   readonly sourceConversationUrl: string | null;
   readonly sourceAssistantMessageId: string | null;
@@ -50,7 +50,7 @@ export function transition(task: TaskRecord, to: TaskStatus): void {
   task.status = to;
 }
 
-/** The prompt as ChatGPT wrote it (what a candidate is compared with), without the appended suffix. */
+/** The prompt as ChatGPT wrote it, without the text older versions appended ("Append to Claude prompts"). */
 export function sourcePrompt(task: Pick<TaskRecord, 'prompt' | 'originalPrompt'>): string {
   return task.originalPrompt ?? task.prompt;
 }

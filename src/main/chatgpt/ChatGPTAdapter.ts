@@ -1,28 +1,19 @@
 import type { WebContents } from 'electron';
-import { isSendToClaudeRequest } from '../../domain/handoff/autoSend';
 import { conversationUrlToStore, isChatGptAppUrl, isChatGptConversationUrl, sameConversationUrl } from '../security/origins';
 import {
-  CLAUDE_PROMPT_LANGUAGE,
   SELECTORS,
   clickSendScript,
   composerTextScript,
   focusComposerScript,
-  intentGuardCall,
-  takeInterceptedIntentsScript,
   installBlockSendButtonsScript,
   takeBlockSendsScript,
   setBlockSendStatusScript,
+  pageStateScript,
+  scriptCall,
   type BlockSendRequest,
   type BlockSendState,
   type TakeBlockSendsResult,
-  type InterceptedIntent,
-  type TakeIntentsResult,
-  latestClaudePromptBlockScript,
-  latestMessageTextScript,
-  pageStateScript,
-  scriptCall,
   type PageScript,
-  type LatestTextResult,
   type PageState,
 } from './pageScripts';
 
@@ -30,8 +21,6 @@ import {
 const ADAPTER_WORLD_ID = 1001;
 const DEFAULT_TIMEOUT_MS = 5_000;
 export const MAX_PROMPT_CHARS = 100_000;
-/** A composer message longer than this is normal chat, never a Sidekick command. */
-export const MAX_COMMAND_CHARS = 240;
 
 export type AdapterErrorCode =
   | 'view_unavailable'
@@ -44,23 +33,12 @@ export type AdapterErrorCode =
   | 'send_button_not_found'
   | 'send_button_disabled'
   | 'still_generating'
-  | 'no_assistant_messages'
-  | 'no_prompt_block'
-  | 'not_found'
   /** The conversation a result belongs to is unknown or could not be opened. */
   | 'conversation_unavailable';
 
 export type AdapterResult<T> = { ok: true; value: T } | { ok: false; code: AdapterErrorCode; detail: string };
 
-export type { InterceptedIntent, BlockSendRequest, BlockSendState };
-
-export interface ClaudePromptCandidate {
-  text: string;
-  messageId: string | null;
-  conversationUrl: string | null;
-  truncated: boolean;
-  capturedAt: string;
-}
+export type { BlockSendRequest, BlockSendState };
 
 /**
  * The only component that knows how to talk to the ChatGPT page. All DOM knowledge is in pageScripts.ts.
@@ -104,36 +82,6 @@ export class ChatGPTAdapter {
     return this.run(scriptCall(pageStateScript, SELECTORS));
   }
 
-  async getLatestClaudePromptBlock(): Promise<AdapterResult<ClaudePromptCandidate>> {
-    const res = await this.run(
-      scriptCall(latestClaudePromptBlockScript, { sel: SELECTORS, language: CLAUDE_PROMPT_LANGUAGE, maxChars: MAX_PROMPT_CHARS }),
-    );
-    if (!res.ok) return res;
-    const r = res.value;
-    if (!r.ok) return { ok: false, code: r.code, detail: r.detail };
-    return {
-      ok: true,
-      value: {
-        text: r.text,
-        messageId: r.messageId,
-        conversationUrl: this.getConversationUrl(),
-        truncated: r.truncated,
-        capturedAt: new Date().toISOString(),
-      },
-    };
-  }
-
-  /** Installs the pre-submit command guard in this document (idempotent). Fail-open: errors only mean no interception. */
-  async installIntentGuard(): Promise<AdapterResult<{ installed: boolean }>> {
-    const res = await this.run(intentGuardCall({ sel: SELECTORS, maxChars: MAX_COMMAND_CHARS, trustedOnly: true }, isSendToClaudeRequest));
-    return res.ok ? { ok: true, value: { installed: res.value.installed } } : res;
-  }
-
-  /** Takes the commands the guard stopped before ChatGPT saw them; `installed: false` means the page was reloaded (reinstall). */
-  async takeInterceptedIntents(enabled: boolean): Promise<AdapterResult<TakeIntentsResult>> {
-    return this.run(scriptCall(takeInterceptedIntentsScript, { enabled }), 2_000);
-  }
-
   /** Injects the per-block "Send to Claude" buttons (idempotent per document). */
   async installBlockSendButtons(): Promise<AdapterResult<{ installed: boolean }>> {
     const res = await this.run(scriptCall(installBlockSendButtonsScript, { sel: SELECTORS, maxChars: MAX_PROMPT_CHARS, trustedOnly: true }));
@@ -148,10 +96,6 @@ export class ChatGPTAdapter {
   /** Shows a click's outcome on its own button. */
   async setBlockSendStatus(id: string, state: BlockSendState, detail: string): Promise<AdapterResult<{ found: boolean }>> {
     return this.run(scriptCall(setBlockSendStatusScript, { id, state, detail }), 2_000);
-  }
-
-  async getLatestUserMessage(maxChars = 2_000): Promise<AdapterResult<LatestTextResult & { ok: true }>> {
-    return this.latestText(SELECTORS.userMessage, maxChars);
   }
 
   /**
@@ -182,13 +126,6 @@ export class ChatGPTAdapter {
       await delay(150);
     }
     return { ok: false, code: 'send_button_disabled', detail: 'send button stayed disabled' };
-  }
-
-  private async latestText(selector: string, maxChars: number): Promise<AdapterResult<LatestTextResult & { ok: true }>> {
-    const res = await this.run(scriptCall(latestMessageTextScript, { selector, maxChars }));
-    if (!res.ok) return res;
-    if (!res.value.ok) return { ok: false, code: 'not_found', detail: res.value.detail };
-    return { ok: true, value: res.value };
   }
 
   private async run<T>(code: PageScript<T>, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<AdapterResult<T>> {

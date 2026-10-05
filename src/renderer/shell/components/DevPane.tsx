@@ -7,9 +7,6 @@ import { DiagnosticsPanel, type DiagnosticsApi } from './DiagnosticsPanel';
 import { TerminalHost } from './TerminalHost';
 
 export interface DevPaneActions {
-  sendToClaude(id: string): void;
-  /** Cancels the user-requested auto-send countdown. */
-  cancelAutoSend(id: string): void;
   cancelTask(id: string): void;
   resetSession(id: string): void;
   retryReview(id: string, taskId: string): void;
@@ -188,8 +185,6 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
         </div>
       )}
 
-      {active?.autoSend && <AutoSendBar at={active.autoSend.at} onCancel={() => actions.cancelAutoSend(active.id)} />}
-      {active?.autoSendNotice && !active.autoSend && <AutoSendNotice notice={active.autoSendNotice} />}
       {active?.latestReview?.status === 'failed' && (
         <div className="review-bar" role="status">
           <span className="review-title" title={active.latestReview.lastError ?? ''}>
@@ -213,42 +208,5 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
         {debugMode && showDiag && <DiagnosticsPanel api={diagnostics} />}
       </div>
     </section>
-  );
-}
-
-/** Live countdown for the user-requested auto-send (D034). */
-export function AutoSendBar({ at, onCancel, compact = false }: { at: string; onCancel(): void; compact?: boolean }) {
-  const left = () => Math.max(0, Math.ceil((Date.parse(at) - Date.now()) / 1000));
-  const [secs, setSecs] = useState(left);
-  useEffect(() => {
-    setSecs(left());
-    const t = setInterval(() => setSecs(left()), 250);
-    return () => clearInterval(t);
-  }, [at]);
-  return (
-    <div className={`review-bar auto-send-bar ${compact ? 'compact' : ''}`} role="status">
-      <span className="review-title">
-        Sending to Claude in {secs} s <span className="auto-send-why">— you asked ChatGPT to send it</span>
-      </span>
-      <button className="btn ghost small" onClick={onCancel}>
-        Cancel
-      </button>
-    </div>
-  );
-}
-
-/** Why "send it to Claude" did not start; fades after a few seconds. */
-export function AutoSendNotice({ notice, compact = false }: { notice: { text: string; at: string }; compact?: boolean }) {
-  const [shown, setShown] = useState(true);
-  useEffect(() => {
-    setShown(true);
-    const t = setTimeout(() => setShown(false), 8_000);
-    return () => clearTimeout(t);
-  }, [notice.at, notice.text]);
-  if (!shown) return null;
-  return (
-    <div className={`review-bar auto-send-bar ${compact ? 'compact' : ''}`} role="status">
-      <span className="review-title">{notice.text}</span>
-    </div>
   );
 }

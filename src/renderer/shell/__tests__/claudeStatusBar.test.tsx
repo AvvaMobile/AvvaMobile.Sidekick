@@ -11,14 +11,12 @@ import { claudeStatus } from '../viewModel';
 function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
   return {
     id, name: `P ${id}`, projectPath: `/Users/x/${id}`, color: '#123', initial: 'P', iconUrl: null, claudeSessionId: null, model: 'opus', effort: null,
-    splitRatio: 0.6, viewMode: 'chatgpt-focus', attention: 'none', chatgpt: { generating: false, loggedIn: true }, candidate: null, sending: false, task: null,
-    latestReview: null, terminal: { running: true, error: null }, autoSend: null,
-    autoSendNotice: null, ...over,
+    splitRatio: 0.6, viewMode: 'chatgpt-focus', attention: 'none', chatgpt: { loggedIn: true }, task: null,
+    latestReview: null, terminal: { running: true, error: null }, ...over,
   };
 }
 const task = (status: string, over: Record<string, unknown> = {}) => ({ id: 't1', status, outcome: null, prompt: 'p', createdAt: '', error: null, review: null, ...over }) as unknown as WorkspaceView['task'];
 const review = { taskId: 't1', status: 'pending' as const, lastError: null, body: 'RESULT' };
-const candidate = { text: 'x', messageId: 'm', alreadySent: false };
 
 let host: HTMLDivElement;
 let root: Root;
@@ -31,7 +29,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
 });
-const props = () => ({ busy: false, style: {}, onSend: vi.fn(), onRetry: vi.fn(), onStop: vi.fn(), onCancelAutoSend: vi.fn(), onOpenClaude: vi.fn() });
+const props = () => ({ style: {}, onRetry: vi.fn(), onStop: vi.fn(), onOpenClaude: vi.fn() });
 const render = (active: WorkspaceView, p = props()) => {
   act(() => root.render(<ClaudeStatusBar active={active} {...p} />));
   return p;
@@ -55,24 +53,16 @@ describe('claudeStatus', () => {
 });
 
 describe('ChatGPT Focus status bar', () => {
-  it('Idle: Send to Claude is disabled without a prompt; Open Claude switches to Claude Focus', () => {
+  it('Idle: only Open Claude, which switches to Claude Focus; no send button in the bar', () => {
     const p = render(ws('a'));
     expect(status()).toBe('Claude: Idle');
-    expect(labels()).toEqual(['Send to Claude', 'Open Claude']);
-    expect(button('Send to Claude')!.disabled).toBe(true);
+    expect(labels()).toEqual(['Open Claude']);
     act(() => button('Open Claude')!.click());
     expect(p.onOpenClaude).toHaveBeenCalledTimes(1);
   });
 
-  it('Send to Claude works from the bar while the terminal is hidden (same handler as Split)', () => {
-    const p = render(ws('a', { candidate }));
-    expect(button('Send to Claude')!.disabled).toBe(false);
-    act(() => button('Send to Claude')!.click());
-    expect(p.onSend).toHaveBeenCalledTimes(1);
-  });
-
-  it('Running shows Stop and no second Send; ChatGPT stays usable (no blocking UI)', () => {
-    const p = render(ws('a', { task: task('running'), candidate }));
+  it('Running shows Stop; ChatGPT stays usable (no blocking UI)', () => {
+    const p = render(ws('a', { task: task('running') }));
     expect(status()).toBe('Claude: Running…');
     expect(labels()).toEqual(['Stop', 'Open Claude']);
     act(() => button('Stop')!.click());
@@ -92,10 +82,9 @@ describe('ChatGPT Focus status bar', () => {
   it('only a failed delivery offers Retry, which retries delivery and nothing else', () => {
     const p = render(ws('a', { task: task('review_pending', { outcome: 'succeeded' }), latestReview: { ...review, status: 'failed', lastError: 'no conversation' } }));
     expect(status()).toBe('Claude: Result delivery failed');
-    expect(labels()).toEqual(['Retry', 'Send to Claude', 'Open Claude']);
+    expect(labels()).toEqual(['Retry', 'Open Claude']);
     act(() => button('Retry')!.click());
     expect(p.onRetry).toHaveBeenCalledTimes(1);
-    expect(p.onSend).not.toHaveBeenCalled();
   });
 
   it('a failed Claude task shows Failed without a send-back button', () => {

@@ -64,11 +64,10 @@ interface ShellWindow {
   layout: SplitLayoutController;
 }
 
-const POLL_MS = 1000;
-/** Cadence of the light check for Sidekick commands stopped in the ChatGPT composer (D045). */
-const INTENT_POLL_MS = 250;
-const INACTIVE_EVERY = 5;
-const LOGIN_CHECK_EVERY = 5;
+/** Cadence of the ChatGPT login check. */
+const LOGIN_POLL_MS = 5000;
+/** Cadence of the light read of clicks on the per-block "Send to Claude" buttons. */
+const BLOCK_SEND_POLL_MS = 250;
 
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
@@ -382,11 +381,8 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       const stored = conversationUrlToStore(url);
       if (store.workspace(w.id)!.chatConversationUrl !== stored) store.updateWorkspace(w.id, { chatConversationUrl: stored });
     };
-    // The pre-submit command guard (D045) is idempotent; the intent poll also reinstalls it after a reload.
-    const guard = () => {
-      void adapter.installIntentGuard();
-      void adapter.installBlockSendButtons();
-    };
+    // Injecting the per-block buttons is idempotent; the click poll also reinstalls them after a reload.
+    const guard = () => void adapter.installBlockSendButtons();
     view.webContents.on('did-finish-load', guard);
     view.webContents.on('did-navigate', (_e, url) => {
       trackUrl(url);
@@ -469,52 +465,23 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     moveTab(id, sw);
   }
 
-  // ---------- Candidate observation (passive; never launches anything) ----------
+  // ---------- ChatGPT login state ----------
 
-  let tick = 0;
-  const inFlight = new Set<string>();
-  const poll = setInterval(() => {
-    tick++;
+  const loginInFlight = new Set<string>();
+  const loginPoll = setInterval(() => {
     for (const [id, c] of chats) {
-      const active = id === windowOf.get(id)?.layout.activeWorkspaceId;
-      if (!active && tick % INACTIVE_EVERY !== 0) continue;
-      if (inFlight.has(id) || c.view.webContents.isLoading()) continue;
-      inFlight.add(id);
+      if (loginInFlight.has(id) || c.view.webContents.isLoading()) continue;
+      loginInFlight.add(id);
       void (async () => {
         try {
-          orchestrator.observeCandidate(id, await c.adapter.getLatestClaudePromptBlock());
-          await orchestrator.observeUserMessage(id);
-          if (tick % LOGIN_CHECK_EVERY === 0) {
-            const s = await c.adapter.getPageState();
-            orchestrator.setChatLoggedIn(id, s.ok ? s.value.composerFound && !s.value.loggedOutMarkers : null);
-          }
+          const s = await c.adapter.getPageState();
+          orchestrator.setChatLoggedIn(id, s.ok ? s.value.composerFound && !s.value.loggedOutMarkers : null);
         } finally {
-          inFlight.delete(id);
+          loginInFlight.delete(id);
         }
       })();
     }
-  }, POLL_MS);
-
-  // Sidekick commands stopped before ChatGPT saw them (D045): a tiny queue read, only for visible ChatGPT views.
-  const intentInFlight = new Set<string>();
-  const intentPoll = setInterval(() => {
-    for (const [id, c] of chats) {
-      if (windowOf.get(id)?.layout.activeWorkspaceId !== id) continue;
-      if (intentInFlight.has(id) || c.view.webContents.isLoading()) continue;
-      intentInFlight.add(id);
-      void (async () => {
-        try {
-          const res = await c.adapter.takeInterceptedIntents(orchestrator.autoSendEnabled());
-          if (!res.ok) return;
-          // A reloaded page lost the guard (it lives in the page's isolated world): put it back.
-          if (!res.value.installed) await c.adapter.installIntentGuard();
-          for (const intent of res.value.intents) orchestrator.observeInterceptedIntent(id, intent);
-        } finally {
-          intentInFlight.delete(id);
-        }
-      })();
-    }
-  }, INTENT_POLL_MS);
+  }, LOGIN_POLL_MS);
 
   // Clicks on a block's own "Send to Claude" button: each carries exactly that block's text.
   const blockSendInFlight = new Set<string>();
@@ -534,7 +501,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
         }
       })();
     }
-  }, INTENT_POLL_MS);
+  }, BLOCK_SEND_POLL_MS);
 
   // ---------- IPC (trusted shell renderer only) ----------
 
@@ -877,8 +844,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       },
     ]).popup({ window: sw.win });
   });
-  handle('handoff:send', async (id) => (known(id) ? orchestrator.sendToClaude(id, 'button') : { ok: false, code: 'unknown_workspace', detail: '' }));
-  handle('handoff:cancel-auto', (id) => (known(id) ? orchestrator.cancelAutoSendRequest(id) : { ok: false }));
   handle('task:cancel', (id) => (known(id) ? orchestrator.cancelTask(id) : { ok: false }));
   handle('session:reset', (id) => (known(id) ? orchestrator.resetSession(id) : { ok: false }));
   // Copy of Claude's last response: clipboard only, never touches the PTY, the session or a running task.
@@ -933,8 +898,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       return fn(c, arg);
     });
   diagHandle('diag:state', (c) => c.adapter.getPageState());
-  diagHandle('diag:capture', (c) => c.adapter.getLatestClaudePromptBlock());
-  diagHandle('diag:latest-user', (c) => c.adapter.getLatestUserMessage());
   diagHandle('diag:mic-status', () => ({ microphone: systemPreferences.getMediaAccessStatus('microphone') }));
   diagHandle('diag:home', (c) => c.view.webContents.loadURL(CHATGPT_HOME_URL).then(() => ({ ok: true })));
   diagHandle('diag:insert', (c, arg) =>
@@ -945,19 +908,12 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   // ---------- App Settings (app menu → Settings…) ----------
 
   const appSettings = (): AppSettings => ({
-    autoSendOnRequest: orchestrator.autoSendEnabled(),
     developerMode: debugMode,
-    claudePromptSuffix: orchestrator.claudePromptSuffix(),
     defaultModel,
     version: app.getVersion(),
     userDataPath: userData,
   });
-  // Both are mirrored by menu checkboxes; every window gets the change through the state push.
-  const setAutoSend = (on: boolean) => {
-    orchestrator.setAutoSendEnabled(on);
-    buildMenu();
-    broadcast();
-  };
+  // Mirrored by a menu checkbox; every window gets the change through the state push.
   const setDebugMode = (on: boolean) => {
     debugMode = on;
     buildMenu();
@@ -967,9 +923,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   handle('app:update-settings', (raw) => {
     const v = validateAppSettingsPatch(raw);
     if (!v.ok) return { ok: false, code: 'invalid', detail: v.detail };
-    if (v.patch.autoSendOnRequest !== undefined) setAutoSend(v.patch.autoSendOnRequest);
     if (v.patch.developerMode !== undefined) setDebugMode(v.patch.developerMode);
-    if (v.patch.claudePromptSuffix !== undefined) orchestrator.setClaudePromptSuffix(v.patch.claudePromptSuffix);
     return { ok: true, settings: appSettings() };
   });
   handle('app:reveal-user-data', () => shell.showItemInFolder(join(userData, 'workspace-state.json')));
@@ -1045,20 +999,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
         ],
       },
       { role: 'editMenu' },
-      {
-        label: 'Workspace',
-        submenu: [
-          { label: 'Send to Claude…', accelerator: 'CmdOrCtrl+Shift+Enter', click: () => command('send-to-claude') },
-          { type: 'separator' },
-          {
-            // D034: when the user's own ChatGPT message asks for it, the ready prompt is sent after a cancellable countdown.
-            label: 'Auto-send when I ask ChatGPT',
-            type: 'checkbox',
-            checked: orchestrator.autoSendEnabled(),
-            click: (item) => setAutoSend(item.checked),
-          },
-        ],
-      },
       { label: 'View', submenu: [{ role: 'togglefullscreen' }] },
       {
         label: 'Developer',
@@ -1125,8 +1065,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     }
     // Secondary windows close without handing their tabs back; nothing about windows is persisted.
     quitting = true;
-    clearInterval(poll);
-    clearInterval(intentPoll);
+    clearInterval(loginPoll);
     clearInterval(blockSendPoll);
     updates.stop();
     orchestrator.shutdown();

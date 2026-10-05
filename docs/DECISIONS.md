@@ -131,17 +131,13 @@ The selected project, running state and attention/completion state must be visua
 
 Superseded by D038.
 
-## D017 - Claude Prompt block contract
+## D017 - Claude Prompt block contract (superseded by D046)
 
-Decision:
-A prompt intended for Claude is rendered by ChatGPT as a distinct copyable fenced/code block. Send to Claude targets the most recent designated Claude Prompt block, not the entire conversation and not an arbitrary assistant response.
+Removed: the mechanism this decision described no longer exists. See D046.
 
-## D018 - Send to Claude has voice and button paths
+## D018 - Send to Claude has voice and button paths (superseded by D046)
 
-Decision:
-The same delegation command can be invoked from a visible button or a narrowly recognized explicit voice command after feasibility is proven.
-
-Both routes freeze and send exactly the same prompt candidate.
+Removed: the mechanism this decision described no longer exists. See D046.
 
 ## D019 - One default Claude session per Workspace
 
@@ -193,7 +189,7 @@ Geometry is computed by one pure module (`src/domain/layout/splitPane.ts`) used 
 
 Resizing never reloads, navigates or recreates the ChatGPT view, never restarts a PTY or Claude process and never resets a session or buffer. No animation.
 
-## D024 - Send to Claude is a two-step trusted-shell action with preview
+## D024 - Send to Claude is a two-step trusted-shell action with preview (superseded by D046)
 
 Decision:
 Send to Claude lives in the trusted local shell (development pane header), never in the remote ChatGPT view. It operates only on the latest designated Claude Prompt block of the selected Workspace.
@@ -228,15 +224,11 @@ Managed runs use `claude -p --output-format stream-json --verbose [--resume <ses
 
 Superseded by D033 (the principle stands: the user's own permission configuration, no permission flags).
 
-## D028 - Designated Claude Prompt: fenced block or Claude-titled writing block
+## D028 - Designated Claude Prompt: fenced block or Claude-titled writing block (superseded by D046)
 
-Decision:
-Besides a ```` ```claude-prompt ```` fenced block, a ChatGPT writing block whose title mentions "Claude" (or whose label is `claude-prompt`) is a designated Claude Prompt block. Its markdown text (`data-markdown-copy-text`) is the candidate. A newly seen block becomes the candidate only after two consecutive identical observations (about 1 s apart), so a block that is still being written never enables Send to Claude.
+Removed: the mechanism this decision described no longer exists. See D046.
 
-Reason:
-In the 2026 logged-in UI, ChatGPT answers "write a prompt for Claude" with a titled writing block rather than a fenced code block. Preview + explicit confirmation (D024) still guard execution.
-
-## D029 - One-click Send to Claude, terminal-only development pane (supersedes parts of D024 and D026)
+## D029 - One-click Send to Claude, terminal-only development pane (supersedes parts of D024 and D026) (send mechanism superseded by D046)
 
 Decision (user direction, 2026-10-01):
 
@@ -250,13 +242,9 @@ Safeguards kept:
 - Managed completion still comes only from the Claude `result` event + process exit; PTY input/output never changes task state (D020).
 - Review handback was approval-gated here (D008); superseded by the automatic handback of D044 (only "Retry" remains, after a failed delivery).
 
-## D030 - Prompt detection fallback: plain-text block in a reply that hands work to Claude
+## D030 - Prompt detection fallback: plain-text block in a reply that hands work to Claude (superseded by D046)
 
-Decision:
-If an assistant reply contains no designated block (D017/D028) but its prose — text outside code/writing blocks — mentions Claude (e.g. "Claude'a bunu ver:"), its last plain-text/markdown code block (`Plain text`, `text`, `markdown`, `prompt` or unlabeled) is the Claude Prompt candidate. Code blocks in any other language are never used. The 2026 UI renders fenced blocks as `[data-markdown-copy="code-block"]` (no `<pre>`) with the language label in the header; both forms are supported.
-
-Reason:
-ChatGPT often answers "send this to Claude" with an untagged plain-text block. The prompt shown in the terminal at start, the stable-candidate rule and the "already run" guard remain.
+Removed: the mechanism this decision described no longer exists. See D046.
 
 ## D031 - Product name Avva Mobile Sidekick (supersedes D002's product name)
 
@@ -265,25 +253,17 @@ The desktop product is named **Avva Mobile Sidekick** and uses the Avva Mobile l
 
 Development: `npm run app` launches `.dev/Avva Mobile Sidekick.app`, an APFS clone of the stock Electron.app with the product name, bundle id `com.avvamobile.sidekick.dev` and icon, re-signed ad hoc (`scripts/dev-bundle.cjs`, rebuilt only when Electron or the icon changes). Dock, app switcher and menu bar therefore show the product name in development too. Because the bundle id differs from stock Electron, macOS asks again for microphone/notification permission once.
 
-## D032 - Any ChatGPT box is a prompt candidate (supersedes D028's title rule and D030)
+## D032 - Any ChatGPT box is a prompt candidate (supersedes D028's title rule and D030) (superseded by D046)
 
-Decision:
-Per assistant reply, newest first: a tagged block wins (```` ```claude-prompt ```` fence/label, or a writing block titled with Claude/`claude-prompt`); otherwise the reply's last "box" is the candidate — any writing block regardless of title (its markdown, with a single outer ```` ``` ```` fence removed), or a plain-text/markdown/unlabeled code block. Code blocks in a programming language (bash, ts, …) are never candidates. A later reply without a box keeps the earlier prompt as the candidate.
-
-Reason:
-ChatGPT titles its boxes freely ("Workspace Repository Sync and Status Audit Prompt") and rarely mentions Claude; requiring the word "Claude" kept Send to Claude disabled. The user's explicit click, the prompt header printed in the terminal and the "already run" guard (D029) remain the safeguards.
+Removed: the mechanism this decision described no longer exists. See D046.
 
 ## D033 - The terminal always runs interactive Claude Code (supersedes the `claude -p` runner of D027/D029)
 
 The right-hand terminal of every Workspace starts `claude --settings <Stop hook> [--resume <session>]` (not a login shell), so the user's own Claude settings, status line footer and permissions apply. Restart starts a fresh session. Send to Claude pastes the frozen prompt into that Claude and submits it (`InteractiveClaudeRunner`); completion comes only from the Claude `Stop` hook, which drops a JSON payload into a per-Workspace directory (`<userData>/hook-events/<id>`, `StopHookChannel`). Cancel sends Escape. Managed activity is no longer rendered into the terminal (it would corrupt Claude's screen); evidence, review packet and handback are unchanged.
 
-## D034 - Auto-send when the user asks ChatGPT to send the prompt to Claude
+## D034 - Auto-send when the user asks ChatGPT to send the prompt to Claude (superseded by D046)
 
-Decision:
-When a new Claude Prompt becomes ready (first time its ChatGPT message is seen, D032 rules) and the user's own latest ChatGPT message explicitly asks for it to go to Claude ("bu promptu Claude'a gönder", "send this to Claude", voice spellings like "Klod'a ilet"), the prompt is sent through the normal Send to Claude path (trigger `auto_user_request`) after a 3-second countdown shown in the development pane with a Cancel button. Detection is a conservative pure function (`src/domain/handoff/autoSend.ts`): imperative send verbs only; negation, deferral or condition words near the phrase ("gönderme", "önce", "ama", "don't", "not yet", "later", "if") reject it. The countdown is cancelled when the candidate changes or disappears, ChatGPT starts writing again, the user sends manually, the Workspace closes or the setting is turned off. A ChatGPT message is never auto-sent twice, and messages already seen before a restart never auto-send. Global setting Workspace → "Auto-send when I ask ChatGPT", default on, persisted in `preferences.autoSendOnRequest`.
-
-Reason:
-The user's own message is explicit delegation (SECURITY §16); ChatGPT output alone still never launches Claude. Prefer false negatives: the button remains the fallback.
+Removed: the mechanism this decision described no longer exists. See D046.
 
 ## D035 - Project identifiers renamed to AvvaMobile.Sidekick
 
@@ -365,7 +345,7 @@ Switching views only calls `setBounds`/`setVisible`; nothing is recreated and no
 The view is stored per Workspace as the optional `uiState.viewMode` (`chatgpt-focus` | `split` | `claude-focus`); default Split. The removed presets are migrated when read: `uiState.layoutMode` `terminal-hidden` -> ChatGPT Focus, `gpt-hidden` -> Claude Focus, anything else Split; `split-20-80` / `split-50-50` / `split-80-20` continue as that ratio. `layoutMode` is never deleted, and when the divider is dragged it is set to `custom`, so master (which ignores `viewMode`) shows the same ratio after a rollback.
 Limits: the ChatGPT Focus bar takes 34 px of height; no view has a Send to ChatGPT button (D044).
 
-## D044 - ChatGPT -> Claude on explicit send intent; managed completion -> ChatGPT automatically
+## D044 - ChatGPT -> Claude on explicit send intent; managed completion -> ChatGPT automatically (outbound send intent superseded by D046; automatic handback stays)
 
 Decision:
 - ChatGPT -> Claude is triggered only by explicit user send intent: the Send to Claude button/shortcut, or the user's own ChatGPT message ("bunu Claude'a gönder", "send this to Claude", D034) followed by the 3 s cancellable countdown. This works in every view, with the terminal hidden or visible.
@@ -378,17 +358,18 @@ Routing: the task records `sourceConversationUrl` (origin + path of the ChatGPT 
 Reason:
 The product experience is "ChatGPT plans, Claude works in the background, ChatGPT reviews". A click after every managed run defeated it, while the explicit send intent on the way out keeps control where it matters. Strict conversation identity prevents a result from landing in the wrong project or conversation.
 
-## D045 - Sidekick command interception: handoff commands are stopped before ChatGPT submits them
+## D045 - Sidekick command interception: handoff commands are stopped before ChatGPT submits them (superseded by D046)
+
+Removed: the mechanism this decision described no longer exists. See D046.
+
+## D046 - Per-block Send to Claude button is the only ChatGPT -> Claude path
 
 Decision:
-Explicit handoff commands typed or dictated into the ChatGPT composer ("şimdi bunu claude gönder", "send this to Claude", D034 wording incl. negation protection) are Sidekick commands, not ChatGPT conversation messages. When technically possible they are intercepted before submission, so ChatGPT never receives them (and never answers "I can't send to Claude").
-- Mechanism: a page script in the existing isolated world (`executeJavaScriptInIsolatedWorld`) installs capture-phase listeners on `document` for Enter (no Shift/Alt, not IME composition), clicks on the send button and `submit`. It reads the composer (contenteditable/ProseMirror or textarea), and only when the text is short (<= 240 chars) and `isSendToClaudeRequest` matches (the very same self-contained function, serialized into the page) it calls `preventDefault`/`stopPropagation`/`stopImmediatePropagation`, clears the composer through the editor's own input path (`execCommand` selectAll+delete, input event fallback) and pushes `{id, text, detectedAt}` onto a queue that lives only in the isolated world. Only trusted (real user) events are intercepted.
-- Transport: no preload, no IPC bridge, no Node, no title/localStorage tricks. Main drains the queue atomically with a light 250 ms read (`ChatGPTAdapter.takeInterceptedIntents`, visible views only); the 1 s DOM/candidate poll is unchanged. The same read reports whether the guard exists, so a reloaded page gets it reinstalled; it is also installed on `did-finish-load`, `did-navigate` and `did-navigate-in-page` (idempotent per document).
-- Orchestration: `WorkspaceOrchestrator.observeInterceptedIntent` enters the same `startAutoSend` path as a message seen after submission (stored candidate, 3 s cancellable countdown, duplicate protection, managed task, automatic handback D044). With no candidate while ChatGPT is still writing the prompt, the command waits up to 60 s for that prompt; with nothing to send the user gets a notice. No separate pipeline.
-- Fail-open: any error, a non-matching message, long text, Shift+Enter, auto-send turned off (synced on every read) or a missing/old page script leaves ChatGPT's normal behavior untouched.
-- The post-submit poll (`getLatestUserMessage` -> `observeUserMessage`, D034) stays as the fallback for selector breakage, unexpected submit paths and non-DOM submits; duplicate protection keeps both paths from starting two tasks.
-- Voice: typed or dictated composer submission is intercepted. ChatGPT Live Voice is a server-streamed turn with no composer submit; pre-submit interception is not guaranteed there, and the post-submit fallback applies. Voice architecture is out of scope.
+- Every prompt/code block of an assistant reply gets its own **Send to Claude** button, injected right after the block's Copy button (page script in the isolated world, `installBlockSendButtonsScript`).
+- A trusted click sends exactly the text of the block that holds the clicked button, read at click time. No stored or detected candidate, no other block, no appended text; the text is only sanitized for the terminal.
+- The button shows sending, then *Sent to Claude ✓* only after Claude's `UserPromptSubmit` hook confirmed the prompt (`submitted` runner event); a refusal (Claude busy, ChatGPT still writing, empty block), an unconfirmed prompt, a cancel or a crash shows *Send failed — Retry* with the reason on that same button. Retry re-reads the block and starts a new send.
+- Removed: candidate detection and the `claude-prompt` tag/box rules (D017, D028, D030, D032), prompt polling, text/voice commands and their pre-submit interception (D034, D045), the auto-send countdown, the ⌘⇧↵ shortcut and menu item, the Send button in the status bar/divider, the "Append to Claude prompts" and "Auto-send" settings, the flow log and the Capture/Latest-user diagnostics. A short login poll remains.
+- Unchanged: the managed task lifecycle, review packet and the automatic handback to the originating conversation with Retry (D044), the status bar (state, Stop, delivery Retry, Open Claude).
 
 Reason:
-A command meant for Sidekick must not become a ChatGPT turn that makes the model answer something wrong. The isolated-world DOM approach keeps the remote content without any bridge (SECURITY §2), and keeping the existing polling as a fallback makes the feature degrade to the previous behavior instead of failing.
-
+Detecting "the" prompt and guessing intent sent the wrong text more than once. The block the user points at is the only unambiguous source of truth, and confirming receipt through Claude's own hook keeps a failed send from looking successful.

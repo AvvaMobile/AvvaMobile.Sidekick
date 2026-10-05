@@ -10,7 +10,7 @@ Sidekick will:
 
 - embed ChatGPT as a remote, isolated web surface with the user's normal login and voice mode;
 - run the user's own interactive Claude Code in the Workspace's project folder;
-- move a prompt from ChatGPT to Claude, and a bounded review packet back, automatically for managed tasks (explicit send intent out, D005, D034; automatic handback in, D044);
+- move a prompt from ChatGPT to Claude, and a bounded review packet back, automatically for managed tasks (the per-block Send to Claude button out, D005, D046; automatic handback in, D044);
 - keep several Workspaces alive at once and switch between them without reloading anything.
 
 Sidekick will not reimplement ChatGPT or Claude Code, store ChatGPT or Anthropic credentials, forward the whole conversation to Claude, give remote content filesystem/shell/Node access, perform destructive Git actions, or use screen-coordinate automation. A Claude success message is not proof that the repository is correct; that is what the ChatGPT review is for.
@@ -21,7 +21,7 @@ Sidekick will not reimplement ChatGPT or Claude Code, store ChatGPT or Anthropic
 - local shell renderer (React)
 - one ChatGPT WebContentsView per Workspace
 - ChatGPT adapter
-- Workspace orchestrator and handoff controller
+- Workspace orchestrator
 - interactive Claude runner (terminal Claude + Stop hook)
 - terminal service (node-pty)
 - Git evidence service
@@ -32,9 +32,8 @@ Conceptual flow:
 ```
 User (voice or text)
   -> ChatGPT WebContentsView
-  -> designated Claude Prompt block (candidate)
-  -> explicit Send to Claude (click, ⌘⇧↵, or the user's own explicit request, D034)
-  -> HandoffController freezes the prompt into a Task
+  -> the "Send to Claude" button next to one prompt/code block's Copy button (D046)
+  -> the orchestrator freezes exactly that block's text into a Task
   -> InteractiveClaudeRunner pastes it into the terminal Claude and submits it
   -> Claude works in the project folder
   -> Claude Stop hook -> StopHookChannel -> task completes with Claude's last answer
@@ -75,17 +74,17 @@ All ChatGPT views share one persistent partition (`persist:chatgpt`) so the user
 
 ## 5. ChatGPT adapter
 
-`src/main/chatgpt/ChatGPTAdapter.ts` with page scripts in `pageScripts.ts`. Operations: conversation URL, latest designated Claude Prompt block, latest user message (for D034), insert composer text, submit, sign-in state.
+`src/main/chatgpt/ChatGPTAdapter.ts` with page scripts in `pageScripts.ts`. Operations: conversation URL, per-block Send to Claude buttons (inject, take clicks, show status), insert composer text, submit, page state (sign-in, generating).
 
 Every operation runs in an isolated world, verifies the origin before and after, times out, returns a typed result, and never returns page HTML wholesale. No other component knows DOM selectors.
 
-Pre-submit command guard (D045): `installIntentGuardScript` (capture-phase Enter/click/submit listeners in the isolated world) stops explicit "send this to Claude" composer commands before ChatGPT submits them and queues them; `ChatGPTAdapter.takeInterceptedIntents` drains the queue every 250 ms for visible views and `WorkspaceOrchestrator.observeInterceptedIntent` feeds the normal auto-send path. The post-submit poll remains as fallback.
+Per-block button (D046): `installBlockSendButtonsScript` injects a button right after the Copy button of every outermost prompt/code block of assistant messages and re-scans on DOM changes. A (trusted) click reads the text from the block that holds the clicked button and queues it; `ChatGPTAdapter.takeBlockSends` drains the queue every 250 ms, `WorkspaceOrchestrator.sendBlockToClaude` freezes that text into a Task and `setBlockSendStatus` shows sending / sent (only after Claude's `UserPromptSubmit` hook confirmed the prompt) / failed + Retry on that same button. No stored candidate, no other block is ever a source.
 
 ## 6. DOM resilience
 
 ChatGPT's DOM is not a stable API. Rules: prefer semantic attributes and ARIA over generated class names; keep selectors in `pageScripts.ts`; cover observed page structures with fixtures (`pageScripts.test.ts`); detect unsupported states explicitly; never click unknown controls; never use screen coordinates; store no authentication material from the page.
 
-Observed structures (2026): logged-in turns use `[data-content-search-unit-key]`; ChatGPT often answers "write a prompt for Claude" with a writing block (`[data-oai-writing-block-surface]`, markdown in `data-markdown-copy-text`); fenced blocks render as `[data-markdown-copy="code-block"]` with the language in a header and no `<pre>`; anonymous sessions use an older `ol[data-conversation-transcript] > li[data-message-role]` structure. The composer is a `contenteditable` inside the form (writing blocks excluded); the send button appears only when the composer has text. Candidate rules: D028/D032.
+Observed structures (2026): logged-in turns use `[data-content-search-unit-key]`; ChatGPT often answers "write a prompt for Claude" with a writing block (`[data-oai-writing-block-surface]`, markdown in `data-markdown-copy-text`); fenced blocks render as `[data-markdown-copy="code-block"]` with the language in a header and no `<pre>`; anonymous sessions use an older `ol[data-conversation-transcript] > li[data-message-role]` structure. The composer is a `contenteditable` inside the form (writing blocks excluded); the send button appears only when the composer has text.
 
 Sign-in workarounds: Electron/app tokens are stripped from the session user agent so identity providers see a normal Chromium UA; Google's `accounts.youtube.com` cookie-sync redirect and regional `accounts.google.<tld>` hosts are allowed as top-level auth navigations only.
 
@@ -121,14 +120,12 @@ PTY output and keystrokes never change task state; only hook events do.
 | Concern | Module |
 | --- | --- |
 | Electron glue, windows, IPC, menu, notifications | `src/main/app/ShellApp.ts`, `src/main/app/shellWindows.ts` |
-| Per-Workspace orchestration (candidate, task, auto-send, review, attention) | `src/main/app/WorkspaceOrchestrator.ts` |
-| Prompt freeze boundary | `src/main/orchestration/HandoffController.ts` |
+| Per-Workspace orchestration (block send, task, review, attention) | `src/main/app/WorkspaceOrchestrator.ts` |
 | Persisted AppState | `src/main/app/AppStateStore.ts` (`<userData>/workspace-state.json`) |
 | Claude runner and hooks | `src/main/claude/InteractiveClaudeRunner.ts`, `StopHookChannel.ts`; executable resolution in `ClaudeRunner.ts` |
 | Git evidence | `src/main/git/GitEvidence.ts` |
 | Terminal | `src/main/terminal/PtyService.ts` (node-pty), `src/renderer/shell/terminals.ts` (xterm.js) |
 | Review packet | `src/domain/review/reviewPacket.ts` |
-| Auto-send detection | `src/domain/handoff/autoSend.ts` |
 | Shell UI | `src/renderer/shell/*` (React) |
 | Updates, setup check | `src/main/app/updater.ts`, `src/main/app/setupCheck.ts` |
 
@@ -185,15 +182,15 @@ See D036 and [RELEASING.md](RELEASING.md): electron-builder, GitHub Releases of 
 
 ## 18. Workspace runtimes
 
-The main process keeps runtime objects per Workspace id: the ChatGPT WebContentsView and its navigation state, the Claude terminal PTY, the orchestrator (task, candidate, review and attention state).
+The main process keeps runtime objects per Workspace id: the ChatGPT WebContentsView and its navigation state, the Claude terminal PTY, the orchestrator (task, review and attention state).
 
 1. Saved Workspaces are restored at startup; open tabs are initialized so switching is instant.
 2. Switching tabs, or moving a tab to another window, changes visibility only; it never destroys a runtime.
 3. Runtimes are disposed only when the user closes a Workspace tab or quits.
 
-## 19. Prompt candidate extraction
+## 19. Prompt source
 
-`ChatGPTAdapter` returns only the latest designated Claude Prompt block (D017, D028, D032), never concatenated conversation text. A block becomes the candidate only after two identical consecutive observations, so a block still being written never enables *Send to Claude*.
+The prompt of a task is the text of the one block whose button was clicked, read at click time in the page (D046). Streaming blocks are refused ("ChatGPT is still writing"). The text is only sanitized for the terminal (control characters removed); nothing is appended.
 
 ## 20. Notifications
 

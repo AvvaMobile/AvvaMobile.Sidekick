@@ -2,7 +2,6 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { AdapterResult, ClaudePromptCandidate } from '../../chatgpt/ChatGPTAdapter';
 import type { ClaudeRunRequest } from '../../claude/ClaudeRunner';
 import { DevelopmentPaneRegistry } from '../../development/DevelopmentPane';
 import { AppStateStore } from '../AppStateStore';
@@ -11,7 +10,6 @@ import { WorkspaceOrchestrator, type BlockSendStatus } from '../WorkspaceOrchest
 const flush = async () => {
   for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
 };
-const candidate = (text: string): AdapterResult<ClaudePromptCandidate> => ({ ok: true, value: { text, messageId: 'cand', conversationUrl: 'https://chatgpt.com/c/x', truncated: false, capturedAt: '' } });
 
 describe('block "Send to Claude" button', () => {
   let runs: ClaudeRunRequest[];
@@ -26,9 +24,7 @@ describe('block "Send to Claude" button', () => {
     statuses = [];
     n = 0;
     const chat = {
-      // A different, newer "latest" block: must never be what a block button sends.
-      getLatestClaudePromptBlock: async () => candidate('LATEST BLOCK (wrong)'),
-      getLatestUserMessage: async () => ({ ok: true as const, value: { text: 'hi', messageId: 'u' } }),
+      getPageState: async () => ({ ok: true as const, value: { generating: false } }),
       getConversationUrl: () => 'https://chatgpt.com/c/x',
       insertComposerText: async () => ({ ok: true as const, value: { inserted: 0 } }),
       submitComposer: async () => ({ ok: true as const, value: { via: 'send-button' } }),
@@ -48,12 +44,9 @@ describe('block "Send to Claude" button', () => {
       newId: () => `id-${++n}`,
     });
     orch.register('a');
-    // The preferences suffix is on by default: a block send must ignore it.
   });
 
-  it('sends exactly the clicked block text (no capture, no candidate, no suffix) and reports started only after Claude confirms', async () => {
-    orch.observeCandidate('a', candidate('STALE CANDIDATE'));
-    orch.observeCandidate('a', candidate('STALE CANDIDATE'));
+  it('sends exactly the clicked block text and reports started only after Claude confirms', async () => {
     await orch.sendBlockToClaude('a', { id: 'r1', text: 'Block two text\n- keep', messageId: 'm-2' });
     await flush();
     expect(runs).toHaveLength(1);

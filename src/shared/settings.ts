@@ -42,10 +42,7 @@ export interface ProjectSettingsPatch {
 }
 
 export interface AppSettings {
-  autoSendOnRequest: boolean;
   developerMode: boolean;
-  /** Global text appended (after a blank line) to every prompt sent to Claude with Send to Claude; '' = nothing. */
-  claudePromptSuffix: string;
   /** Read-only: Claude Code's default model from ~/.claude/settings.json (null when unset or not a known choice). */
   defaultModel: ModelChoice | null;
   version: string;
@@ -53,9 +50,7 @@ export interface AppSettings {
 }
 
 export interface AppSettingsPatch {
-  autoSendOnRequest?: boolean;
   developerMode?: boolean;
-  claudePromptSuffix?: string;
 }
 
 /** Which settings screen a shell window should show (pushed by the main process). */

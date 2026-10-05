@@ -48,8 +48,6 @@ contextBridge.exposeInMainWorld('workspace', {
   updateAppSettings: (patch: unknown) => ipcRenderer.invoke('app:update-settings', patch && typeof patch === 'object' ? patch : {}),
   revealUserData: () => ipcRenderer.invoke('app:reveal-user-data'),
 
-  sendToClaude: (id: string) => ipcRenderer.invoke('handoff:send', str(id)),
-  cancelAutoSend: (id: string) => ipcRenderer.invoke('handoff:cancel-auto', str(id)),
   cancelTask: (id: string) => ipcRenderer.invoke('task:cancel', str(id)),
   resetSession: (id: string) => ipcRenderer.invoke('session:reset', str(id)),
   responseInfo: (id: string) => ipcRenderer.invoke('response:info', str(id)),
@@ -70,8 +68,6 @@ contextBridge.exposeInMainWorld('workspace', {
 
   diagnostics: {
     state: () => ipcRenderer.invoke('diag:state'),
-    capture: () => ipcRenderer.invoke('diag:capture'),
-    latestUser: () => ipcRenderer.invoke('diag:latest-user'),
     micStatus: () => ipcRenderer.invoke('diag:mic-status'),
     home: () => ipcRenderer.invoke('diag:home'),
     insert: (text: string) => ipcRenderer.invoke('diag:insert', str(text)),

@@ -43,7 +43,6 @@ export function App({ api }: { api: WorkspaceApi }) {
   }, []);
   const closeDialog = useCallback(() => setDialog(queuedDialogs.current.shift() ?? null), []);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [busy, setBusy] = useState(false);
   const [showStart, setShowStart] = useState(false);
   const [settings, setSettings] = useState<SettingsTarget | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -114,16 +113,6 @@ export function App({ api }: { api: WorkspaceApi }) {
 
   const actions: DevPaneActions = useMemo(
     () => ({
-      sendToClaude: async (id) => {
-        setBusy(true);
-        try {
-          const r = await api.sendToClaude(id);
-          if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Claude not started', body: r.detail ?? 'No Claude Prompt block found' });
-        } finally {
-          setBusy(false);
-        }
-      },
-      cancelAutoSend: (id) => void api.cancelAutoSend(id),
       cancelTask: (id) => void api.cancelTask(id),
       resetSession: (id) =>
         void api.resetSession(id).then((r) => {
@@ -169,7 +158,6 @@ export function App({ api }: { api: WorkspaceApi }) {
         if (c === 'setup-prompt') queueDialog('setup');
         if (c === 'fullscreen-enter') setFullscreen(true);
         if (c === 'fullscreen-leave') setFullscreen(false);
-        if (c === 'send-to-claude' && active) void actions.sendToClaude(active.id);
       }),
     [api, active, actions, queueDialog],
   );
@@ -287,12 +275,9 @@ export function App({ api }: { api: WorkspaceApi }) {
           {view.statusBar && (
             <ClaudeStatusBar
               active={active}
-              busy={busy}
               style={{ left: view.statusBar.x, top: view.statusBar.y, width: view.statusBar.width, height: view.statusBar.height }}
-              onSend={() => void actions.sendToClaude(active.id)}
               onRetry={() => active.latestReview && actions.retryReview(active.id, active.latestReview.taskId)}
               onStop={() => actions.cancelTask(active.id)}
-              onCancelAutoSend={() => actions.cancelAutoSend(active.id)}
               onOpenClaude={() => api.setViewMode(active.id, 'claude-focus')}
             />
           )}
