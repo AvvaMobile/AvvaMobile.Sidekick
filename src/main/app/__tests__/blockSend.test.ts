@@ -50,7 +50,8 @@ describe('block "Send to Claude" button', () => {
     await orch.sendBlockToClaude('a', { id: 'r1', text: 'Block two text\n- keep', messageId: 'm-2' });
     await flush();
     expect(runs).toHaveLength(1);
-    expect(runs[0]!.prompt).toBe('Block two text\n- keep');
+    expect(runs[0]!.prompt.startsWith('Block two text\n- keep\n\nFINAL OUTPUT FORMAT')).toBe(true);
+    expect(runs[0]!.marker?.taskId).toBe(runs[0]!.taskId);
     expect(statuses).toEqual([]); // not started yet: Claude has not confirmed
     runs[0]!.onEvent({ type: 'submitted' });
     expect(statuses).toEqual([{ id: 'r1', state: 'started', detail: expect.any(String) }]);

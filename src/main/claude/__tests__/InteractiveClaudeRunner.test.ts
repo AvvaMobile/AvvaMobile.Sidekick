@@ -252,3 +252,29 @@ describe('Stop hook payload', () => {
     expect(lastAssistantText(jsonl)).toBe('final');
   });
 });
+
+describe('InteractiveClaudeRunner task markers', () => {
+  const marker = { taskId: 't', nonce: 'n1' };
+  const wrap = (m: { taskId: string; nonce: string }, body: string) => `blah\n<<<SIDEKICK_START:${m.taskId}:${m.nonce}>>>\n${body}\n<<<SIDEKICK_END:${m.taskId}:${m.nonce}>>>`;
+  const run = (msg: string, stopSession = 's1') => {
+    const t = setup();
+    t.runner.start({ ...t.req, marker });
+    t.submitted('do it');
+    t.stop({ sessionId: stopSession, transcriptPath: null, lastAssistantMessage: msg });
+    return t;
+  };
+  it('hands back only the marked content', () => {
+    const t = run(wrap(marker, 'answer'));
+    expect(t.events).toContainEqual(expect.objectContaining({ type: 'result', isError: false, result: 'answer' }));
+  });
+  it('rejects wrong nonce, missing END, no markers, other task id', () => {
+    for (const msg of [wrap({ taskId: 't', nonce: 'bad' }, 'x'), wrap({ taskId: 'other', nonce: 'n1' }, 'x'), '<<<SIDEKICK_START:t:n1>>>\nx', 'plain']) {
+      const t = run(msg);
+      expect(t.events).toContainEqual(expect.objectContaining({ type: 'result', isError: true, subtype: 'marker_missing' }));
+    }
+  });
+  it('rejects a Stop from another Claude session', () => {
+    const t = run(wrap(marker, 'answer'), 'other-session');
+    expect(t.events).toContainEqual(expect.objectContaining({ type: 'result', isError: true, subtype: 'marker_missing' }));
+  });
+});

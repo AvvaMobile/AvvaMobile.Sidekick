@@ -173,7 +173,10 @@ describe('WorkspaceOrchestrator', () => {
     expect(req.workspaceId).toBe('b');
     expect(req.cwd).toBe('/tmp/project-b');
     expect(req.resumeSessionId).toBe('session-b');
-    expect(req.prompt).toBe('Prompt for B');
+    expect(req.prompt.startsWith('Prompt for B')).toBe(true);
+    expect(req.prompt).toContain(`<<<SIDEKICK_START:${req.taskId}:${req.marker!.nonce}>>>`);
+    expect(req.prompt).toContain(`<<<SIDEKICK_END:${req.taskId}:${req.marker!.nonce}>>>`);
+    expect(req.marker!.taskId).toBe(req.taskId);
     expect(orch.view('a')!.task).toBeNull();
     complete(req);
     await flush();
@@ -498,7 +501,8 @@ describe('WorkspaceOrchestrator', () => {
       store.setViewMode('a', mode);
       const req = await startTask('a');
       expect(runs).toHaveLength(1);
-      expect(req.prompt).toBe('Prompt for A');
+      expect(req.prompt.startsWith('Prompt for A')).toBe(true);
+      expect(req.marker?.taskId).toBe(req.taskId);
       expect(orch.view('a')!.viewMode).toBe(mode);
       expect(orch.view('a')!.task!.status).toBe('running');
     });

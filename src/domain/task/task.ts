@@ -9,6 +9,8 @@ export interface TaskError {
 
 export interface TaskRecord {
   readonly id: string;
+  /** Random per-task secret of the START/END final-output markers (absent on tasks created before markers). */
+  readonly nonce?: string;
   readonly workspaceId: string;
   /** Frozen at creation (queued); never modified afterwards. */
   readonly prompt: string;
@@ -62,6 +64,7 @@ export function isTaskActive(task: TaskRecord | null | undefined): boolean {
 
 export function newTask(args: {
   id: string;
+  nonce?: string;
   workspaceId: string;
   prompt: string;
   originalPrompt?: string;
@@ -72,6 +75,7 @@ export function newTask(args: {
 }): TaskRecord {
   return {
     id: args.id,
+    ...(args.nonce ? { nonce: args.nonce } : {}),
     workspaceId: args.workspaceId,
     prompt: args.prompt,
     ...(args.originalPrompt !== undefined && args.originalPrompt !== args.prompt ? { originalPrompt: args.originalPrompt } : {}),

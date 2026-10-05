@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { posix, win32 } from 'node:path';
+import type { TaskMarker } from '../../domain/handback/markers';
 
 /** What a managed run reports back: the Claude session id, then the turn's final result (D006). */
 export type ClaudeStreamEvent =
@@ -15,6 +16,8 @@ export interface ClaudeRunRequest {
   workspaceId: string;
   cwd: string;
   prompt: string;
+  /** Managed block tasks: the final result is accepted only between this task's START/END markers. */
+  marker?: TaskMarker;
   resumeSessionId: string | null;
   onEvent(event: ClaudeStreamEvent): void;
   /** `cancelled`: the run ended because the user interrupted it (not a failure, not a result). */

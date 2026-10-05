@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { markerInstruction } from '../../domain/handback/markers';
 import { buildReviewPacketBody, type GitSnapshot, type ReviewPacket } from '../../domain/review/reviewPacket';
 import { sanitizeTerminalPrompt } from '../../domain/prompt/promptText';
 import { isTaskActive, newTask, transition, type TaskRecord } from '../../domain/task/task';
@@ -70,6 +71,7 @@ export interface OrchestratorDeps {
   /** Shows a block button's outcome (ChatGPT page). */
   blockSendStatus?(workspaceId: string, status: BlockSendStatus): void;
   newId?: () => string;
+  newNonce?: () => string;
   now?: () => Date;
 }
 
@@ -101,10 +103,12 @@ export type OpResult = { ok: true } | { ok: false; code: string; detail: string 
 export class WorkspaceOrchestrator {
   private readonly runtimes = new Map<string, Runtime>();
   private readonly newId: () => string;
+  private readonly newNonce: () => string;
   private readonly now: () => Date;
 
   constructor(private readonly deps: OrchestratorDeps) {
     this.newId = deps.newId ?? randomUUID;
+    this.newNonce = deps.newNonce ?? (() => randomBytes(12).toString('hex'));
     this.now = deps.now ?? (() => new Date());
   }
 
@@ -196,6 +200,7 @@ export class WorkspaceOrchestrator {
     if (!prompt.trim()) return { ok: false, code: 'empty_block', detail: 'This block is empty' };
     const task = newTask({
       id: this.newId(),
+      nonce: this.newNonce(),
       workspaceId,
       prompt,
       sourceConversationUrl: chat.getConversationUrl?.() ?? null,
@@ -266,7 +271,8 @@ export class WorkspaceOrchestrator {
       taskId: task.id,
       workspaceId,
       cwd: ws.projectPath,
-      prompt: task.prompt,
+      // Every managed task asks for its final answer between its own START/END markers (task id + nonce).
+      ...(task.nonce ? { prompt: task.prompt + markerInstruction({ taskId: task.id, nonce: task.nonce }), marker: { taskId: task.id, nonce: task.nonce } } : { prompt: task.prompt }),
       resumeSessionId: task.claudeSessionIdBefore,
       onEvent: (ev) => this.onClaudeEvent(workspaceId, task, ev),
       onExit: (exit) => {
@@ -336,7 +342,7 @@ export class WorkspaceOrchestrator {
       case 'result':
         rt.resultSeen = true;
         if (ev.sessionId) this.recordSession(workspaceId, task, ev.sessionId);
-        task.claudeResult = ev.result;
+        task.claudeResult = ev.subtype === 'marker_missing' ? null : ev.result; // never keep unmarked output as a result
         if (ev.isError) task.error = { code: `claude_${ev.subtype}`, message: ev.result?.slice(0, 300) || `Claude reported ${ev.subtype}`, retryable: true };
         this.deps.store.putTask(task);
         break;
