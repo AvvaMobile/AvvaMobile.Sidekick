@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('workspace', {
   getProjectSettings: (id: string) => ipcRenderer.invoke('workspace:get-settings', str(id)),
   // The patch is validated strictly in the main process; only a plain object is forwarded.
   updateProjectSettings: (id: string, patch: unknown) => ipcRenderer.invoke('workspace:update-settings', str(id), patch && typeof patch === 'object' ? patch : {}),
+  verifyGithub: (id: string) => ipcRenderer.invoke('workspace:verify-github', str(id)),
   chooseIcon: (id: string) => ipcRenderer.invoke('workspace:choose-icon', str(id)),
   getAppSettings: () => ipcRenderer.invoke('app:get-settings'),
   updateAppSettings: (patch: unknown) => ipcRenderer.invoke('app:update-settings', patch && typeof patch === 'object' ? patch : {}),

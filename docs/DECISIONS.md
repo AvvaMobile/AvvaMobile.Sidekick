@@ -341,3 +341,13 @@ Clear keeps its purpose (`/clear` clears Claude's context) and is disabled only 
 
 Reason:
 Interrupting with Escape/Ctrl+C ends a Claude turn without a `Stop` event, and a relaunch hid the old process's exit, so a run could wait forever: STOP stayed, and the toolbar (disabled whenever a task "ran") stayed locked.
+
+## D042 - GitHub repository is metadata; access is verified explicitly, with a temporary token source
+
+Decision:
+A Workspace may carry `githubRepository` (`owner/repo`, normalized from `owner/repo`, github.com URLs or `git@github.com:` remotes) and a last-known `githubAccess` (`status`, optional `permission`, `checkedAt`). Saving the repository needs no authentication. If it was never set (`undefined`), Project Settings best-effort prefills it from the folder's `origin` remote (`git remote get-url origin`, fixed arguments); a saved or user-cleared (`null`) value is never touched, and a prefill is never verified automatically.
+"Verify access" (and one automatic check after saving) calls `GET /repos/{owner}/{repo}` and maps the result to `accessible` (+ read/triage/write/maintain/admin), `no-access`, `not-found`, `auth-required` or `error`. Without a token the state is `auth-required`, never a guess. Changing or clearing the repository clears `githubAccess`; a result that arrives after the repository changed is dropped. The saved status is a hint only: an explicit verify always re-checks. No shell command is ever built from the repository value.
+Current authentication mechanism (temporary): `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`. This is a stopgap, not the intended end-user experience; a product-quality GitHub connection flow (for example OAuth) may replace it, and only `defaultGithubToken` needs to change.
+
+Reason:
+Syntactic validity proves nothing about access, and permissions change. Reusing an existing login avoids new auth architecture until a real connection flow is designed.

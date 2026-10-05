@@ -45,6 +45,8 @@ import { SplitLayoutController } from '../workspace/SplitLayoutController';
 import { AppStateStore } from './AppStateStore';
 import { validateAppSettingsPatch, validateProjectSettingsPatch } from './settingsValidation';
 import { isSamePage, mergeWindowOrder, nextActiveTab, stateForWindow } from './shellWindows';
+import { prefillGithubRepository } from '../github/gitRemote';
+import { defaultGithubToken, setGithubRepository, verifyWorkspaceGithub } from '../github/GithubAccessChecker';
 import { UpdateService } from './updater';
 import { checkTool, microphoneSettingsUrl, microphoneStatus } from './setupCheck';
 import { ICON_EXTENSIONS, WorkspaceIcons } from './WorkspaceIcons';
@@ -756,6 +758,8 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       defaultModel,
       chatConversationUrl: w.chatConversationUrl,
       claudeSessionId: w.claudeSessionId,
+      githubRepository: w.githubRepository ?? null,
+      githubAccess: w.githubAccess ?? { status: 'unchecked' },
       taskActive: taskActive(id),
     };
   };
@@ -766,7 +770,12 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       return false;
     }
   };
-  handle('workspace:get-settings', (id) => (isId(id) ? projectSettings(id) : null));
+  handle('workspace:get-settings', async (id) => {
+    if (!isId(id)) return null;
+    // Best-effort prefill from the folder's git remote while the repository was never set.
+    if (await prefillGithubRepository(store, id)) broadcast();
+    return projectSettings(id);
+  });
   handleIn('workspace:choose-icon', (sw, id) => (isId(id) && store.workspace(id) ? chooseIcon(sw, id) : { ok: false, detail: 'Project not found.' }));
   // One validated entry point for every per-project setting; side effects follow the change.
   handleIn('workspace:update-settings', async (sw, id, raw) => {
@@ -808,6 +817,9 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       const url = patch.chatConversationUrl ?? CHATGPT_HOME_URL;
       if (c) void c.view.webContents.loadURL(url).catch((err: Error) => diag(`[${id.slice(0, 8)}] load error ${redactUrlsIn(err.message)}`));
     }
+    if (patch.githubRepository !== undefined && patch.githubRepository !== (w.githubRepository ?? null)) {
+      setGithubRepository(store, id, patch.githubRepository);
+    }
     if (pathChanged) {
       store.updateWorkspace(id, { projectPath: patch.projectPath! });
       orchestrator.resetSession(id);
@@ -816,6 +828,14 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
         pty.restartIn(id, patch.projectPath!);
       }
     }
+    broadcast();
+    return { ok: true, settings: projectSettings(id) };
+  });
+  // Explicit "Verify access": always re-checks through the GitHub API; the saved result is only a hint.
+  handle('workspace:verify-github', async (id) => {
+    if (!isId(id) || !store.workspace(id)) return { ok: false, detail: 'Project not found.' };
+    if (!store.workspace(id)!.githubRepository) return { ok: false, detail: 'Enter a GitHub repository first.' };
+    await verifyWorkspaceGithub(store, id, { getToken: () => defaultGithubToken(), fetch, now: () => new Date() });
     broadcast();
     return { ok: true, settings: projectSettings(id) };
   });

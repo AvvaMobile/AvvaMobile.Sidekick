@@ -26,6 +26,7 @@ export interface WorkspaceApi {
   projectContextMenu(id: string): Promise<void>;
   getProjectSettings(id: string): Promise<ProjectSettings | null>;
   updateProjectSettings(id: string, patch: ProjectSettingsPatch): Promise<Result<{ settings: ProjectSettings | null }>>;
+  verifyGithub(id: string): Promise<Result<{ settings: ProjectSettings | null }>>;
   /** File dialog for a custom tab icon; `code: 'cancelled'` when the user closed it. */
   chooseIcon(id: string): Promise<Result>;
   getAppSettings(): Promise<AppSettings>;

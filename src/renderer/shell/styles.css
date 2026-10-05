@@ -185,6 +185,10 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .folder-row { display: flex; gap: 8px; align-items: center; }
 .folder { flex: 1; background: var(--term); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .form-error { color: var(--err); font-size: 12px; }
+.github-status { font-size: 12px; margin-top: 6px; color: var(--muted); }
+.github-status.ok { color: var(--ok); }
+.github-status.warn { color: var(--warn); }
+.github-status.bad { color: var(--err); }
 .toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; z-index: 30; max-width: 340px; }
 .toast { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 9px; background: var(--pane-2); border: 1px solid var(--border); border-left: 3px solid var(--info); cursor: pointer; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
 .toast.success { border-left-color: var(--ok); }

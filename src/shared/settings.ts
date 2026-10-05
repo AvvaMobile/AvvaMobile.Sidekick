@@ -1,3 +1,4 @@
+import type { GithubAccess } from './github';
 import type { ModelChoice } from './models';
 
 /** Everything the Project Settings screen shows and edits for one Workspace. */
@@ -16,6 +17,10 @@ export interface ProjectSettings {
   /** Remembered ChatGPT conversation; null = ChatGPT home. */
   chatConversationUrl: string | null;
   claudeSessionId: string | null;
+  /** GitHub repository as `owner/repo`, or null. */
+  githubRepository: string | null;
+  /** Last known access check for the repository (status 'unchecked' when never checked). */
+  githubAccess: GithubAccess;
   /** A Claude task is running (path/model/session changes are refused meanwhile). */
   taskActive: boolean;
 }
@@ -32,6 +37,8 @@ export interface ProjectSettingsPatch {
   model?: ModelChoice | null;
   chatConversationUrl?: string | null;
   icon?: null;
+  /** Accepts `owner/repo` or a github.com URL; stored normalized. null clears it. */
+  githubRepository?: string | null;
 }
 
 export interface AppSettings {

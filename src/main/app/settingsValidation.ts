@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path';
 import { validateWorkspaceName } from '../../domain/workspace/workspace';
+import { parseGithubRepository } from '../../shared/github';
 import { isModelChoice } from '../../shared/models';
 import type { AppSettingsPatch, ProjectSettingsPatch } from '../../shared/settings';
 import { conversationUrlToStore, isChatGptConversationUrl } from '../security/origins';
@@ -8,7 +9,7 @@ export type Validated<T> = { ok: true; patch: T } | { ok: false; detail: string 
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
-const PROJECT_KEYS = ['name', 'projectPath', 'color', 'model', 'chatConversationUrl', 'icon'] as const;
+const PROJECT_KEYS = ['name', 'projectPath', 'color', 'model', 'chatConversationUrl', 'icon', 'githubRepository'] as const;
 const APP_KEYS = ['autoSendOnRequest', 'developerMode'] as const;
 
 /**
@@ -50,6 +51,15 @@ export function validateProjectSettingsPatch(raw: unknown, isDirectory: (path: s
   if ('icon' in raw) {
     if (raw.icon !== null) return { ok: false, detail: 'Choose an icon with “Choose Image…”.' };
     patch.icon = null;
+  }
+  if ('githubRepository' in raw) {
+    const r = raw.githubRepository;
+    if (r === null || r === '') patch.githubRepository = null;
+    else {
+      const repo = parseGithubRepository(r);
+      if (!repo) return { ok: false, detail: 'Enter a GitHub repository as owner/repo.' };
+      patch.githubRepository = repo;
+    }
   }
   return { ok: true, patch };
 }

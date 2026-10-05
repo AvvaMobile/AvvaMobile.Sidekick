@@ -3,11 +3,33 @@ import { SIDEBAR_COLORS } from '../../../domain/workspace/workspace';
 import { MODEL_CHOICES, type ModelChoice } from '../../../shared/models';
 import type { ProjectSettings as Settings, ProjectSettingsPatch } from '../../../shared/settings';
 import type { WorkspaceApi } from '../api';
+import type { GithubAccess } from '../../../shared/github';
 import { Row, Section, SettingsPage } from './SettingsPage';
 
-type Field = 'name' | 'path' | 'color' | 'icon' | 'model' | 'chat' | 'session' | 'danger';
+type Field = 'name' | 'path' | 'color' | 'icon' | 'model' | 'chat' | 'github' | 'session' | 'danger';
 
 const label = (m: ModelChoice) => m[0]!.toUpperCase() + m.slice(1);
+
+const PERMISSION_LABEL = { read: 'read', triage: 'triage', write: 'read/write', maintain: 'maintain', admin: 'admin' } as const;
+
+/** Visible verification state for the repository field. */
+export function githubStatusText(a: GithubAccess, checking: boolean): { mark: string; text: string; tone: 'ok' | 'warn' | 'bad' | 'idle' } {
+  if (checking) return { mark: '…', text: 'Checking…', tone: 'idle' };
+  switch (a.status) {
+    case 'accessible':
+      return { mark: '✓', text: `Accessible${a.permission ? ` — ${PERMISSION_LABEL[a.permission]}` : ''}`, tone: 'ok' };
+    case 'no-access':
+      return { mark: '✕', text: 'No access to this repository', tone: 'bad' };
+    case 'not-found':
+      return { mark: '✕', text: 'Repository not found or you do not have access', tone: 'bad' };
+    case 'auth-required':
+      return { mark: '⚠', text: 'Authentication required — connect GitHub (gh auth login), then verify', tone: 'warn' };
+    case 'error':
+      return { mark: '⚠', text: 'Verification failed — try again', tone: 'warn' };
+    default:
+      return { mark: '', text: 'Not checked', tone: 'idle' };
+  }
+}
 
 interface Props {
   api: WorkspaceApi;
@@ -23,6 +45,8 @@ export function ProjectSettings({ api, workspaceId, refreshKey, onClose }: Props
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [name, setName] = useState('');
   const [chatLink, setChatLink] = useState('');
+  const [repo, setRepo] = useState('');
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -36,6 +60,7 @@ export function ProjectSettings({ api, workspaceId, refreshKey, onClose }: Props
   // Drafts follow the saved value whenever it changes.
   useEffect(() => setName(s?.name ?? ''), [s?.name]);
   useEffect(() => setChatLink(s?.chatConversationUrl ?? ''), [s?.chatConversationUrl]);
+  useEffect(() => setRepo(s?.githubRepository ?? ''), [s?.githubRepository]);
 
   const fail = (f: Field, detail?: string) => setErrors((e) => ({ ...e, [f]: detail || 'Not saved.' }));
   const clear = (f: Field) => setErrors((e) => ({ ...e, [f]: undefined }));
@@ -62,6 +87,31 @@ export function ProjectSettings({ api, workspaceId, refreshKey, onClose }: Props
     const v = chatLink.trim();
     if (v === (s.chatConversationUrl ?? '')) return clear('chat');
     void update('chat', { chatConversationUrl: v === '' ? null : v });
+  };
+  const verifyGithub = async () => {
+    setChecking(true);
+    try {
+      const r = await api.verifyGithub(workspaceId);
+      if (r.ok) {
+        clear('github');
+        if (r.settings) setS(r.settings);
+      } else fail('github', r.detail);
+    } finally {
+      setChecking(false);
+    }
+  };
+  const commitRepo = async () => {
+    const v = repo.trim();
+    if (v === (s.githubRepository ?? '')) return clear('github');
+    const r = await api.updateProjectSettings(workspaceId, { githubRepository: v === '' ? null : v });
+    if (!r.ok) return fail('github', r.detail);
+    clear('github');
+    if (r.settings) {
+      setS(r.settings);
+      setRepo(r.settings.githubRepository ?? ''); // show the normalized value even when it equals the saved one
+    }
+    // The repository is saved even without authentication; check it once right after saving.
+    if (v !== '') await verifyGithub();
   };
   const changeFolder = async () => {
     const r = await api.pickFolder();
@@ -189,6 +239,38 @@ export function ProjectSettings({ api, workspaceId, refreshKey, onClose }: Props
               Reset to ChatGPT Home
             </button>
           </div>
+        </Row>
+      </Section>
+
+      <Section title="GitHub">
+        <Row label="Repository" hint="owner/repo or a github.com link. Saved without signing in; verification is separate." error={errors.github}>
+          <div className="folder-row">
+            <input
+              className="set-input"
+              aria-label="GitHub repository"
+              placeholder="AvvaMobile/AvvaMobile.Sidekick"
+              value={repo}
+              maxLength={200}
+              onChange={(e) => setRepo(e.target.value)}
+              onBlur={() => void commitRepo()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void commitRepo();
+              }}
+            />
+            <button className="btn small" disabled={!s.githubRepository || checking} onClick={() => void verifyGithub()}>
+              Verify access
+            </button>
+          </div>
+          {s.githubRepository &&
+            (() => {
+              const st = githubStatusText(s.githubAccess, checking);
+              return (
+                <div className={`github-status ${st.tone}`} role="status" aria-label="GitHub access status" title={s.githubAccess.checkedAt ? `Last checked ${new Date(s.githubAccess.checkedAt).toLocaleString()}` : undefined}>
+                  {st.mark && `${st.mark} `}
+                  {st.text}
+                </div>
+              );
+            })()}
         </Row>
       </Section>
 

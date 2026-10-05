@@ -1,4 +1,5 @@
 import type { EffortChoice, ModelChoice } from '../../shared/models';
+import type { GithubAccess } from '../../shared/github';
 import type { FlowEntry } from '../../shared/state';
 import type { LayoutMode } from '../layout/splitPane';
 
@@ -26,6 +27,10 @@ export interface WorkspaceRecord {
   effort?: EffortChoice | null;
   /** Recent ChatGPT <-> Claude flow steps, newest last ("where did I leave off?"). */
   flowLog?: FlowEntry[];
+  /** GitHub repository as `owner/repo` (metadata only; saved without authentication). Absent in older records. */
+  githubRepository?: string | null;
+  /** Last known access check for `githubRepository`; cleared whenever the repository changes. Never authoritative. */
+  githubAccess?: GithubAccess | null;
 }
 
 export const isOpen = (w: Pick<WorkspaceRecord, 'open'>): boolean => w.open !== false;

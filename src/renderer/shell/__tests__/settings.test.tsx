@@ -21,6 +21,8 @@ const project = (over: Partial<ProjectSettingsData> = {}): ProjectSettingsData =
   defaultModel: 'opus',
   chatConversationUrl: 'https://chatgpt.com/c/abc',
   claudeSessionId: 'sess-1',
+  githubRepository: null,
+  githubAccess: { status: 'unchecked' },
   taskActive: false,
   ...over,
 });
@@ -38,6 +40,7 @@ function fakeApi(p = project(), a = appData()) {
     platform: 'darwin',
     getProjectSettings: vi.fn(async () => p),
     updateProjectSettings: vi.fn(async (_id: string, patch: object) => ({ ok: true as const, settings: { ...p, ...patch } })),
+    verifyGithub: vi.fn(async () => ({ ok: true as const, settings: { ...p, githubAccess: { status: 'accessible' as const, permission: 'write' as const } } })),
     chooseIcon: vi.fn(async () => ({ ok: false as const, code: 'cancelled' })),
     pickFolder: vi.fn(async () => ({ path: '/Users/x/beta', name: 'beta' })),
     resetSession: vi.fn(async () => ({ ok: true as const })),
@@ -189,5 +192,18 @@ describe('settings screens', () => {
       act(() => (host.querySelector('button[aria-label="App settings"]') as HTMLButtonElement).click());
       expect(onSettings).toHaveBeenCalled();
     });
+  });
+});
+
+describe('GitHub access status text', () => {
+  it('shows each state visibly', async () => {
+    const { githubStatusText } = await import('../components/ProjectSettings');
+    expect(githubStatusText({ status: 'unchecked' }, false).text).toBe('Not checked');
+    expect(githubStatusText({ status: 'unchecked' }, true).text).toBe('Checking…');
+    expect(githubStatusText({ status: 'accessible', permission: 'write' }, false).text).toBe('Accessible — read/write');
+    expect(githubStatusText({ status: 'auth-required' }, false).text).toMatch(/Authentication required/);
+    expect(githubStatusText({ status: 'not-found' }, false).text).toMatch(/not found/);
+    expect(githubStatusText({ status: 'no-access' }, false).tone).toBe('bad');
+    expect(githubStatusText({ status: 'error' }, false).text).toMatch(/Verification failed/);
   });
 });
