@@ -59,6 +59,13 @@ describe('validateProjectSettingsPatch', () => {
 });
 
 describe('validateAppSettingsPatch', () => {
+  it('accepts claudePromptSuffix (also empty) and rejects non-strings / too long', () => {
+    expect(validateAppSettingsPatch({ claudePromptSuffix: 'a\nb' })).toEqual({ ok: true, patch: { claudePromptSuffix: 'a\nb' } });
+    expect(validateAppSettingsPatch({ claudePromptSuffix: '' })).toEqual({ ok: true, patch: { claudePromptSuffix: '' } });
+    expect(validateAppSettingsPatch({ claudePromptSuffix: 5 }).ok).toBe(false);
+    expect(validateAppSettingsPatch({ claudePromptSuffix: 'x'.repeat(4001) }).ok).toBe(false);
+  });
+
   it('accepts booleans for the known preferences', () => {
     expect(validateAppSettingsPatch({ autoSendOnRequest: false })).toEqual({ ok: true, patch: { autoSendOnRequest: false } });
     expect(validateAppSettingsPatch({ developerMode: true, autoSendOnRequest: true })).toEqual({ ok: true, patch: { developerMode: true, autoSendOnRequest: true } });

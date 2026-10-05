@@ -938,6 +938,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   const appSettings = (): AppSettings => ({
     autoSendOnRequest: orchestrator.autoSendEnabled(),
     developerMode: debugMode,
+    claudePromptSuffix: orchestrator.claudePromptSuffix(),
     defaultModel,
     version: app.getVersion(),
     userDataPath: userData,
@@ -959,6 +960,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     if (!v.ok) return { ok: false, code: 'invalid', detail: v.detail };
     if (v.patch.autoSendOnRequest !== undefined) setAutoSend(v.patch.autoSendOnRequest);
     if (v.patch.developerMode !== undefined) setDebugMode(v.patch.developerMode);
+    if (v.patch.claudePromptSuffix !== undefined) orchestrator.setClaudePromptSuffix(v.patch.claudePromptSuffix);
     return { ok: true, settings: appSettings() };
   });
   handle('app:reveal-user-data', () => shell.showItemInFolder(join(userData, 'workspace-state.json')));

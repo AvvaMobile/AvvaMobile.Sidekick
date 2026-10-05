@@ -2,6 +2,7 @@ import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { renameWithRetry } from './renameWithRetry';
 import { DEFAULT_SPLIT_RATIO, isValidSplitRatio, type SplitRatio } from '../../domain/layout/splitPane';
+import { DEFAULT_PROMPT_SUFFIX } from '../../domain/handoff/promptSuffix';
 import { isViewMode, legacyPresetRatio, legacyViewMode, type ViewMode } from '../../domain/layout/viewMode';
 import type { ReviewPacket } from '../../domain/review/reviewPacket';
 import type { TaskRecord } from '../../domain/task/task';
@@ -33,9 +34,11 @@ export interface Preferences {
   coffeePromptShown: boolean;
   /** The one-time requirements popup (D037) has been shown. */
   setupPromptShown: boolean;
+  /** Global "Append to Claude prompts" text (optional on disk; absent = default, '' = the user cleared it). */
+  claudePromptSuffix: string;
 }
 
-const defaultPreferences = (): Preferences => ({ autoSendOnRequest: true, coffeePromptShown: false, setupPromptShown: false });
+const defaultPreferences = (): Preferences => ({ autoSendOnRequest: true, coffeePromptShown: false, setupPromptShown: false, claudePromptSuffix: DEFAULT_PROMPT_SUFFIX });
 
 const empty = (): AppState => ({
   schemaVersion: APP_STATE_SCHEMA_VERSION,
@@ -242,6 +245,7 @@ export class AppStateStore implements SplitRatioStore {
           autoSendOnRequest: parsed.preferences?.autoSendOnRequest !== false,
           coffeePromptShown: parsed.preferences?.coffeePromptShown === true,
           setupPromptShown: parsed.preferences?.setupPromptShown === true,
+          claudePromptSuffix: typeof parsed.preferences?.claudePromptSuffix === 'string' ? parsed.preferences.claudePromptSuffix : DEFAULT_PROMPT_SUFFIX,
         },
       };
       // Restart recovery (WORKFLOW §8): no child process survives a restart.

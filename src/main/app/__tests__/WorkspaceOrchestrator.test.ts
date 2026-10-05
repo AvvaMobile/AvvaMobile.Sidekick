@@ -7,6 +7,7 @@ import type { WorkspaceRecord } from '../../../domain/workspace/workspace';
 import type { AdapterResult, ClaudePromptCandidate } from '../../chatgpt/ChatGPTAdapter';
 import type { ClaudeRunRequest } from '../../claude/ClaudeRunner';
 import { DevelopmentPaneRegistry } from '../../development/DevelopmentPane';
+import { DEFAULT_PROMPT_SUFFIX } from '../../../domain/handoff/promptSuffix';
 import { AppStateStore } from '../AppStateStore';
 import { WorkspaceOrchestrator, type TaskFinishedNotice } from '../WorkspaceOrchestrator';
 
@@ -112,6 +113,7 @@ describe('WorkspaceOrchestrator', () => {
     });
     orch.register('a');
     orch.register('b');
+    orch.setClaudePromptSuffix(''); // the Append-to-Claude-prompts tests set their own
   });
 
   /** A candidate is accepted once the same block is observed on two consecutive polls. */
@@ -759,5 +761,68 @@ describe('WorkspaceOrchestrator', () => {
     await flush();
     expect(o.view('a')!.task).toMatchObject({ status: 'failed', error: expect.stringContaining('boom') });
     expect(o.activeTaskWorkspaceIds()).toEqual([]);
+  });
+
+  describe('Append to Claude prompts', () => {
+    it('appends the suffix after a blank line; task keeps the original too', async () => {
+      orch.setClaudePromptSuffix('Be brief.');
+      const req = await startTask('a');
+      expect(req.prompt).toBe('Prompt for A\n\nBe brief.');
+      expect(orch.view('a')!.task!.prompt).toBe('Prompt for A\n\nBe brief.');
+      expect(store.task(orch.view('a')!.task!.id)!.originalPrompt).toBe('Prompt for A');
+    });
+
+    it('uses the default suffix on first use', async () => {
+      orch.setClaudePromptSuffix(DEFAULT_PROMPT_SUFFIX);
+      const req = await startTask('a');
+      expect(req.prompt.startsWith('Prompt for A\n\n1. Cevabında')).toBe(true);
+    });
+
+    it('an empty or blank suffix leaves the prompt unchanged', async () => {
+      orch.setClaudePromptSuffix('');
+      expect((await startTask('a')).prompt).toBe('Prompt for A');
+      orch.setClaudePromptSuffix(' \n ');
+      expect((await startTask('b')).prompt).toBe('Prompt for B');
+    });
+
+    it('the same global suffix applies to every Workspace', async () => {
+      orch.setClaudePromptSuffix('X');
+      expect((await startTask('a')).prompt).toBe('Prompt for A\n\nX');
+      expect((await startTask('b')).prompt).toBe('Prompt for B\n\nX');
+    });
+
+    it('changing the suffix after the task started does not change its frozen prompt', async () => {
+      orch.setClaudePromptSuffix('first');
+      const req = await startTask('a');
+      orch.setClaudePromptSuffix('second');
+      expect(orch.view('a')!.task!.prompt).toBe('Prompt for A\n\nfirst');
+      expect(req.prompt).toBe('Prompt for A\n\nfirst');
+      expect(store.task(orch.view('a')!.task!.id)!.prompt).toBe('Prompt for A\n\nfirst');
+    });
+
+    it('manual terminal input is never modified', async () => {
+      const pty = { write: vi.fn() };
+      panes.attachPty('a', pty);
+      orch.setClaudePromptSuffix('Be brief.');
+      panes.writeUserInput('a', 'hello claude\r');
+      expect(pty.write).toHaveBeenCalledWith('hello claude\r');
+      expect(pty.write.mock.calls.flat().join('')).not.toContain('Be brief.');
+    });
+
+    it('Send to ChatGPT (review packet) carries no suffix', async () => {
+      orch.setClaudePromptSuffix('SUFFIX-MARKER');
+      const req = await startTask('a');
+      complete(req);
+      await flush();
+      await orch.sendReview('a', orch.view('a')!.task!.id);
+      expect(chats.a!.inserted[0]).not.toContain('SUFFIX-MARKER');
+    });
+
+    it('a prompt that already ran is still recognised after the suffix was appended', async () => {
+      const req = await startTask('a');
+      complete(req);
+      await flush();
+      expect(await orch.sendToClaude('a', 'button')).toMatchObject({ ok: false, code: 'already_sent' });
+    });
   });
 });

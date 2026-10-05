@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { DEFAULT_PROMPT_SUFFIX, MAX_PROMPT_SUFFIX_CHARS } from '../../../domain/handoff/promptSuffix';
 import type { AppSettings as Settings, AppSettingsPatch } from '../../../shared/settings';
 import type { WorkspaceApi } from '../api';
 import { Row, Section, SettingsPage } from './SettingsPage';
@@ -16,11 +17,15 @@ const revealLabel = (platform: string) => (platform === 'darwin' ? 'Reveal in Fi
 export function AppSettings({ api, refreshKey, onClose }: Props) {
   const [s, setS] = useState<Settings | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [suffix, setSuffix] = useState('');
 
   useEffect(() => {
     let live = true;
     void api.getAppSettings().then((r) => {
-      if (live) setS(r);
+      if (live) {
+        setS(r);
+        setSuffix(r.claudePromptSuffix);
+      }
     });
     return () => {
       live = false;
@@ -32,6 +37,7 @@ export function AppSettings({ api, refreshKey, onClose }: Props) {
     if (r.ok) {
       setError(null);
       setS(r.settings);
+      setSuffix(r.settings.claudePromptSuffix);
     } else setError(r.detail ?? 'Not saved.');
   };
 
@@ -55,6 +61,25 @@ export function AppSettings({ api, refreshKey, onClose }: Props) {
               }
             >
               <span className="set-value">{s.defaultModel ? s.defaultModel[0]!.toUpperCase() + s.defaultModel.slice(1) : 'Claude Code default'}</span>
+            </Row>
+          </Section>
+
+          <Section title="Prompts">
+            <Row label="Append to Claude prompts" hint="This text is appended to every prompt sent to Claude.">
+              <textarea
+                className="set-textarea"
+                aria-label="Append to Claude prompts"
+                rows={6}
+                maxLength={MAX_PROMPT_SUFFIX_CHARS}
+                value={suffix}
+                onChange={(e) => setSuffix(e.target.value)}
+                onBlur={() => suffix !== s.claudePromptSuffix && void update({ claudePromptSuffix: suffix })}
+              />
+              <div>
+                <button className="btn small" disabled={suffix === DEFAULT_PROMPT_SUFFIX} onClick={() => void update({ claudePromptSuffix: DEFAULT_PROMPT_SUFFIX })}>
+                  Restore default
+                </button>
+              </div>
             </Row>
           </Section>
 

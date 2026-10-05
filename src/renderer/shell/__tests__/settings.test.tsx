@@ -28,6 +28,7 @@ const project = (over: Partial<ProjectSettingsData> = {}): ProjectSettingsData =
 });
 const appData = (over: Partial<AppSettingsData> = {}): AppSettingsData => ({
   autoSendOnRequest: true,
+  claudePromptSuffix: 'S',
   developerMode: false,
   defaultModel: 'sonnet',
   version: '0.1.0',
@@ -178,6 +179,23 @@ describe('settings screens', () => {
       expect(f.updateAppSettings).toHaveBeenCalledWith({ autoSendOnRequest: false });
       act(() => button(host, 'Reveal in Finder').click());
       expect(f.revealUserData).toHaveBeenCalled();
+    });
+
+    it('edits the Append to Claude prompts text and saves it on blur', async () => {
+      const { f } = await render();
+      const ta = host.querySelector('textarea[aria-label="Append to Claude prompts"]') as HTMLTextAreaElement;
+      expect(ta.value).toBe('S');
+      expect(host.textContent).toContain('This text is appended to every prompt sent to Claude.');
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      act(() => {
+        setter.call(ta, '');
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => {
+        ta.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      });
+      await flush();
+      expect(f.updateAppSettings).toHaveBeenCalledWith({ claudePromptSuffix: '' });
     });
 
     it('Esc closes', async () => {

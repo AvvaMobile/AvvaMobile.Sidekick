@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { buildReviewPacketBody, type GitSnapshot, type ReviewPacket } from '../../domain/review/reviewPacket';
 import { appendFlow } from '../../domain/flow/flow';
 import { AUTO_SEND_DELAY_MS, isSendToClaudeRequest } from '../../domain/handoff/autoSend';
-import { isTaskActive, newTask, transition, type TaskRecord } from '../../domain/task/task';
+import { composeClaudePrompt } from '../../domain/handoff/promptSuffix';
+import { isTaskActive, newTask, sourcePrompt, transition, type TaskRecord } from '../../domain/task/task';
 import { initialFor } from '../../domain/workspace/workspace';
 import type { AttentionState, FlowKind, LatestReviewView, TaskView, WorkspaceView } from '../../shared/state';
 import type { AdapterResult, ClaudePromptCandidate } from '../chatgpt/ChatGPTAdapter';
@@ -234,6 +235,7 @@ export class WorkspaceOrchestrator {
     rt.sending = true;
     this.deps.onChange();
     let frozen: FrozenTask;
+    let finalPrompt: string;
     try {
       const res = await this.handoff.send(workspaceId, chat, trigger);
       if (!res.ok) return res;
@@ -242,9 +244,11 @@ export class WorkspaceOrchestrator {
         return { ok: false, code: 'candidate_changed', detail: 'The Claude Prompt changed before it was sent' };
       const last = this.currentTask(workspaceId);
       // Without a preview step, one click must not silently re-run work that already succeeded.
-      if (last && last.prompt === res.task.prompt && last.outcome === 'succeeded')
+      if (last && sourcePrompt(last) === res.task.prompt && last.outcome === 'succeeded')
         return { ok: false, code: 'already_sent', detail: 'This Claude Prompt was already run successfully. Ask ChatGPT for a new prompt.' };
       frozen = res.task;
+      // Frozen here: later Settings changes never touch this task.
+      finalPrompt = composeClaudePrompt(frozen.prompt, this.deps.store.preferences().claudePromptSuffix);
     } finally {
       rt.sending = false;
     }
@@ -252,7 +256,8 @@ export class WorkspaceOrchestrator {
     const task = newTask({
       id: frozen.taskId,
       workspaceId,
-      prompt: frozen.prompt,
+      prompt: finalPrompt,
+      originalPrompt: frozen.prompt,
       sourceConversationUrl: frozen.conversationUrl,
       sourceAssistantMessageId: frozen.sourceMessageId,
       claudeSessionIdBefore: ws.claudeSessionId,
@@ -524,7 +529,7 @@ export class WorkspaceOrchestrator {
       attention: rt.attention,
       chatgpt: { generating: rt.generating, loggedIn: rt.loggedIn },
       candidate: cand
-        ? { text: cand.text, messageId: cand.messageId, alreadySent: !!task && task.prompt === cand.text && task.outcome === 'succeeded' }
+        ? { text: cand.text, messageId: cand.messageId, alreadySent: !!task && sourcePrompt(task) === cand.text && task.outcome === 'succeeded' }
         : null,
       sending: rt.sending,
       autoSend: rt.autoSend ? { at: rt.autoSend.at } : null,
@@ -583,7 +588,7 @@ export class WorkspaceOrchestrator {
     const last = [...(ws.flowLog ?? [])].reverse().find((e) => e.kind === 'prompt_ready');
     if (last && (messageId ? last.messageId === messageId : last.detail === firstLine(text))) return;
     const task = this.currentTask(workspaceId);
-    if (task && task.prompt === text && task.outcome === 'succeeded') return; // already ran: not waiting on the user
+    if (task && sourcePrompt(task) === text && task.outcome === 'succeeded') return; // already ran: not waiting on the user
     this.flow(workspaceId, 'prompt_ready', firstLine(text), messageId);
     this.nudge(workspaceId, ws.name, 'Claude Prompt ready', 'ChatGPT wrote a prompt that has not been sent to Claude yet.');
     void this.maybeScheduleAutoSend(workspaceId, messageId, text);
@@ -593,7 +598,15 @@ export class WorkspaceOrchestrator {
 
   private alreadyRan(workspaceId: string, text: string): boolean {
     const task = this.currentTask(workspaceId);
-    return !!task && task.prompt === text && task.outcome === 'succeeded';
+    return !!task && sourcePrompt(task) === text && task.outcome === 'succeeded';
+  }
+
+  claudePromptSuffix(): string {
+    return this.deps.store.preferences().claudePromptSuffix;
+  }
+
+  setClaudePromptSuffix(text: string): void {
+    this.deps.store.setPreferences({ claudePromptSuffix: text });
   }
 
   autoSendEnabled(): boolean {

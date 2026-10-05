@@ -1,4 +1,4 @@
-import type { TaskRecord } from '../task/task';
+import { sourcePrompt, type TaskRecord } from '../task/task';
 
 export interface GitSnapshot {
   phase: 'before' | 'after';
@@ -67,7 +67,7 @@ export function buildReviewPacketBody(args: {
   if (task.error) lines.push(`Error: ${task.error.message}`);
   lines.push('');
   lines.push('Prompt that was sent to Claude (excerpt):');
-  lines.push(fence(clip(task.prompt, PROMPT_EXCERPT)));
+  lines.push(fence(clip(sourcePrompt(task), PROMPT_EXCERPT)));
   lines.push('');
   lines.push("Claude's final result:");
   lines.push(fence(clip(task.claudeResult?.trim() || '(no final result reported)', RESULT_MAX)));
