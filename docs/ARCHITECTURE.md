@@ -10,7 +10,7 @@ Sidekick will:
 
 - embed ChatGPT as a remote, isolated web surface with the user's normal login and voice mode;
 - run the user's own interactive Claude Code in the Workspace's project folder;
-- move a prompt from ChatGPT to Claude, and a bounded review packet back, only on an explicit user action (D005, D008, D034);
+- move a prompt from ChatGPT to Claude, and a bounded review packet back, automatically for managed tasks (the per-block Send to Claude button out, D005, D046; automatic handback in, D044);
 - keep several Workspaces alive at once and switch between them without reloading anything.
 
 Sidekick will not reimplement ChatGPT or Claude Code, store ChatGPT or Anthropic credentials, forward the whole conversation to Claude, give remote content filesystem/shell/Node access, perform destructive Git actions, or use screen-coordinate automation. A Claude success message is not proof that the repository is correct; that is what the ChatGPT review is for.
@@ -18,10 +18,10 @@ Sidekick will not reimplement ChatGPT or Claude Code, store ChatGPT or Anthropic
 ## 1. High-level component model
 
 - Electron main process
-- local shell renderer (React) and a small local relay overlay renderer
+- local shell renderer (React)
 - one ChatGPT WebContentsView per Workspace
 - ChatGPT adapter
-- Workspace orchestrator and handoff controller
+- Workspace orchestrator
 - interactive Claude runner (terminal Claude + Stop hook)
 - terminal service (node-pty)
 - Git evidence service
@@ -32,15 +32,13 @@ Conceptual flow:
 ```
 User (voice or text)
   -> ChatGPT WebContentsView
-  -> designated Claude Prompt block (candidate)
-  -> explicit Send to Claude (click, ⌘⇧↵, or the user's own explicit request, D034)
-  -> HandoffController freezes the prompt into a Task
+  -> the "Send to Claude" button next to one prompt/code block's Copy button (D046)
+  -> the orchestrator freezes exactly that block's text into a Task
   -> InteractiveClaudeRunner pastes it into the terminal Claude and submits it
   -> Claude works in the project folder
   -> Claude Stop hook -> StopHookChannel -> task completes with Claude's last answer
   -> Git Evidence Service -> Review Packet (review_pending)
-  -> user clicks Send to ChatGPT
-  -> ChatGPT Adapter inserts and submits the packet
+  -> automatic handback (D044): ChatGPT Adapter restores the source conversation, inserts and submits the packet
   -> ChatGPT review -> user
 ```
 
@@ -52,7 +50,7 @@ Owns all privileged capabilities: path validation, child processes, PTYs, Git, p
 
 ### Local renderers
 
-The shell renderer and the relay overlay are packaged application code. They request narrow operations through preload IPC (open project picker, send to Claude, cancel, send review, terminal input/resize, …). There is no generic execute-shell API.
+The shell renderer is packaged application code. They request narrow operations through preload IPC (open project picker, send to Claude, cancel, retry a failed review delivery, terminal input/resize, …). There is no generic execute-shell API.
 
 ### ChatGPT remote view
 
@@ -61,9 +59,8 @@ Remote, untrusted content with no preload and no bridge. Sidekick interacts with
 ## 3. Shell composition
 
 - **Tab strip** (`src/renderer/shell/components/TabBar.tsx`, D038): one tab per open Workspace, browser-style, reorderable by dragging, with a running/finished/failed badge. `+` opens the Projects start page, which lists saved Workspaces. Closing a tab keeps the saved Workspace.
-- **Multiple windows** (`src/main/app/shellWindows.ts`, `ShellApp.ts`): right-click a tab → *Move to New Window* / *Move to Main Window*. Each open tab lives in exactly one window; each window has its own active tab, split layout and relay overlay. Runtimes (ChatGPT view, PTY, orchestrator) are shared and are never recreated by a move.
+- **Multiple windows** (`src/main/app/shellWindows.ts`, `ShellApp.ts`): right-click a tab → *Move to New Window* / *Move to Main Window*. Each open tab lives in exactly one window; each window has its own active tab and split layout. Runtimes (ChatGPT view, PTY, orchestrator) are shared and are never recreated by a move.
 - **Work area**: ChatGPT on the left, the development pane (terminal Claude) on the right, with a draggable divider.
-- **Relay overlay**: the two round buttons on the divider (*Send to Claude*, *Send to ChatGPT*) live in their own transparent local WebContentsView (`src/renderer/relay`, `src/preload/relay.ts`) so they can sit above the ChatGPT view. Clicks are accepted only from that window's relay view; the window's shell renderer performs the action for its active Workspace.
 
 Each Workspace owns one ChatGPT WebContentsView that stays alive while the app runs. Only the active tab's view is visible and sized into the left region; others are hidden, never navigated or destroyed.
 
@@ -77,15 +74,17 @@ All ChatGPT views share one persistent partition (`persist:chatgpt`) so the user
 
 ## 5. ChatGPT adapter
 
-`src/main/chatgpt/ChatGPTAdapter.ts` with page scripts in `pageScripts.ts`. Operations: conversation URL, latest designated Claude Prompt block, latest user message (for D034), insert composer text, submit, sign-in state.
+`src/main/chatgpt/ChatGPTAdapter.ts` with page scripts in `pageScripts.ts`. Operations: conversation URL, per-block Send to Claude buttons (inject, take clicks, show status), insert composer text, submit, page state (sign-in, generating).
 
 Every operation runs in an isolated world, verifies the origin before and after, times out, returns a typed result, and never returns page HTML wholesale. No other component knows DOM selectors.
+
+Per-block button (D046): `installBlockSendButtonsScript` injects a button right after the Copy button of every outermost prompt/code block of assistant messages and re-scans on DOM changes. A (trusted) click reads the text from the block that holds the clicked button and queues it; `ChatGPTAdapter.takeBlockSends` drains the queue every 250 ms, `WorkspaceOrchestrator.sendBlockToClaude` freezes that text into a Task and `setBlockSendStatus` shows sending / sent (only after Claude's `UserPromptSubmit` hook confirmed the prompt) / failed + Retry on that same button. No stored candidate, no other block is ever a source.
 
 ## 6. DOM resilience
 
 ChatGPT's DOM is not a stable API. Rules: prefer semantic attributes and ARIA over generated class names; keep selectors in `pageScripts.ts`; cover observed page structures with fixtures (`pageScripts.test.ts`); detect unsupported states explicitly; never click unknown controls; never use screen coordinates; store no authentication material from the page.
 
-Observed structures (2026): logged-in turns use `[data-content-search-unit-key]`; ChatGPT often answers "write a prompt for Claude" with a writing block (`[data-oai-writing-block-surface]`, markdown in `data-markdown-copy-text`); fenced blocks render as `[data-markdown-copy="code-block"]` with the language in a header and no `<pre>`; anonymous sessions use an older `ol[data-conversation-transcript] > li[data-message-role]` structure. The composer is a `contenteditable` inside the form (writing blocks excluded); the send button appears only when the composer has text. Candidate rules: D028/D032.
+Observed structures (2026): logged-in turns use `[data-content-search-unit-key]`; ChatGPT often answers "write a prompt for Claude" with a writing block (`[data-oai-writing-block-surface]`, markdown in `data-markdown-copy-text`); fenced blocks render as `[data-markdown-copy="code-block"]` with the language in a header and no `<pre>`; anonymous sessions use an older `ol[data-conversation-transcript] > li[data-message-role]` structure. The composer is a `contenteditable` inside the form (writing blocks excluded); the send button appears only when the composer has text.
 
 Sign-in workarounds: Electron/app tokens are stripped from the session user agent so identity providers see a normal Chromium UA; Google's `accounts.youtube.com` cookie-sync redirect and regional `accounts.google.<tld>` hosts are allowed as top-level auth navigations only.
 
@@ -121,22 +120,20 @@ PTY output and keystrokes never change task state; only hook events do.
 | Concern | Module |
 | --- | --- |
 | Electron glue, windows, IPC, menu, notifications | `src/main/app/ShellApp.ts`, `src/main/app/shellWindows.ts` |
-| Per-Workspace orchestration (candidate, task, auto-send, review, attention) | `src/main/app/WorkspaceOrchestrator.ts` |
-| Prompt freeze boundary | `src/main/orchestration/HandoffController.ts` |
+| Per-Workspace orchestration (block send, task, review, attention) | `src/main/app/WorkspaceOrchestrator.ts` |
 | Persisted AppState | `src/main/app/AppStateStore.ts` (`<userData>/workspace-state.json`) |
 | Claude runner and hooks | `src/main/claude/InteractiveClaudeRunner.ts`, `StopHookChannel.ts`; executable resolution in `ClaudeRunner.ts` |
 | Git evidence | `src/main/git/GitEvidence.ts` |
 | Terminal | `src/main/terminal/PtyService.ts` (node-pty), `src/renderer/shell/terminals.ts` (xterm.js) |
 | Review packet | `src/domain/review/reviewPacket.ts` |
-| Auto-send detection | `src/domain/handoff/autoSend.ts` |
-| Shell UI | `src/renderer/shell/*` (React); relay overlay `src/renderer/relay/*` |
+| Shell UI | `src/renderer/shell/*` (React) |
 | Updates, setup check | `src/main/app/updater.ts`, `src/main/app/setupCheck.ts` |
 
-The right-hand pane is the Workspace's terminal running Claude (xterm.js on node-pty). Its header has **Clear** (`/clear`: the Claude context; disabled while a task runs, because it would be queued into that turn), **Copy** (copies the code of Claude's last completed response from the Stop hook's `last_assistant_message`, never terminal text and never `/copy`: one fenced block → its body; several → a menu; none → the full response; ▾ = full response; D040), the model switch and effort level (usable while a task runs: they apply from the next turn, D041), **Stop** only while a managed task is active, and **⋯** (*New Claude session*). A sub-header shows the project path and Claude session. The relay buttons sit on the divider, not in the header; only the auto-send countdown is shown in the pane (review handback is the relay button).
+The right-hand pane is the Workspace's terminal running Claude (xterm.js on node-pty). Its header has **Clear** (`/clear`: the Claude context; disabled while a task runs, because it would be queued into that turn), the model switch and effort level (usable while a task runs: they apply from the next turn, D041), **Stop** only while a managed task is active, and **⋯** (*New Claude session*). A sub-header shows the project path and Claude session, and a failed result delivery shows a compact Retry (D044).
 
 Managed activity is not rendered into the terminal: only Claude itself writes there (rendering into it would corrupt Claude's screen).
 
-Isolation (D022): ChatGPT activity never writes to the terminal, sends input to a PTY, starts Claude or changes task state. ChatGPT/adapter/IPC/navigation/permission diagnostics go to the diagnostics log, never to a renderer surface. ChatGPT-side modules must not import the development pane, PTY, terminal or orchestration modules (enforced by `src/__tests__/isolationBoundaries.test.ts`). The only ChatGPT → Claude path is `HandoffController.sendToClaude()`.
+Isolation (D022): ChatGPT activity never writes to the terminal, sends input to a PTY, starts Claude or changes task state. ChatGPT/adapter/navigation/permission events go to the diagnostics log file, never to a renderer surface. ChatGPT-side modules must not import the development pane, PTY, terminal or orchestration modules (enforced by `src/__tests__/isolationBoundaries.test.ts`). The only ChatGPT → Claude path is the click on a block's own *Send to Claude* button (`WorkspaceOrchestrator.sendBlockToClaude`); the only Claude → ChatGPT path is the automatic handback of that managed task (D044, D047).
 
 ## 11. Orchestrator state machine
 
@@ -152,11 +149,10 @@ On task completion:
 2. collect Git evidence
 3. create and persist the ReviewPacket, mark `review_pending`
 4. notify the user
-5. wait for the user's click on *Send to ChatGPT*
-6. insert and submit the packet into that Workspace's ChatGPT conversation
-7. mark `review_sent`
+5. (succeeded managed tasks only) restore the source conversation (`ChatGPTAdapter.ensureConversation`), then insert and submit the packet there, waiting while ChatGPT is replying or holds a draft
+6. mark `review_sent`
 
-If sending fails, the task stays `review_pending` and can be retried without rerunning Claude.
+If delivery fails, the task stays `review_pending`, the Workspace shows "Result delivery failed" and Retry re-delivers the stored packet without rerunning Claude. Manual terminal turns are never handed back (D044).
 
 ## 12. Git evidence service
 
@@ -186,15 +182,15 @@ See D036 and [RELEASING.md](RELEASING.md): electron-builder, GitHub Releases of 
 
 ## 18. Workspace runtimes
 
-The main process keeps runtime objects per Workspace id: the ChatGPT WebContentsView and its navigation state, the Claude terminal PTY, the orchestrator (task, candidate, review and attention state).
+The main process keeps runtime objects per Workspace id: the ChatGPT WebContentsView and its navigation state, the Claude terminal PTY, the orchestrator (task, review and attention state).
 
 1. Saved Workspaces are restored at startup; open tabs are initialized so switching is instant.
 2. Switching tabs, or moving a tab to another window, changes visibility only; it never destroys a runtime.
 3. Runtimes are disposed only when the user closes a Workspace tab or quits.
 
-## 19. Prompt candidate extraction
+## 19. Prompt source
 
-`ChatGPTAdapter` returns only the latest designated Claude Prompt block (D017, D028, D032), never concatenated conversation text. A block becomes the candidate only after two identical consecutive observations, so a block still being written never enables *Send to Claude*.
+The prompt of a task is the text of the one block whose button was clicked, read at click time in the page (D046). Streaming blocks are refused ("ChatGPT is still writing"). The text is only sanitized for the terminal (control characters removed); nothing is appended.
 
 ## 20. Notifications
 
@@ -213,4 +209,4 @@ Settings are minimal; the user never configures what Sidekick can detect. No pas
 
 - Claude executable is resolved automatically (login-shell `PATH`); `SIDEKICK_CLAUDE_PATH` overrides it.
 - Approved ChatGPT/OpenAI origins live only in `src/main/security/origins.ts`, with tests.
-- Environment variables: `SIDEKICK_USER_DATA`, `SIDEKICK_DEVELOPER` (Developer menu), `SIDEKICK_NO_UPDATES`, `SIDEKICK_CLAUDE_PATH`, `SIDEKICK_DIAG_CONSOLE` (diagnostics to stdout). Older `WORKSPACE_*` names still work.
+- Environment variables: `SIDEKICK_USER_DATA`, `SIDEKICK_NO_UPDATES`, `SIDEKICK_CLAUDE_PATH`, `SIDEKICK_DIAG_CONSOLE` (diagnostics log to stdout). Older `WORKSPACE_*` names still work.

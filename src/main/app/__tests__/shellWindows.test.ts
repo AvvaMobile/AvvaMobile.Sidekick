@@ -10,13 +10,11 @@ describe('stateForWindow', () => {
       workspaces: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] as unknown as WorkspaceView[],
       projects: [{ id: 'a', name: 'A', projectPath: '/a', open: true }],
       activeWorkspaceId: 'a',
-      debugMode: true,
     } satisfies ShellState;
     const s = stateForWindow(state, inSet('b', 'c'), 'c');
     expect(s.workspaces.map((w) => w.id)).toEqual(['b', 'c']);
     expect(s.activeWorkspaceId).toBe('c');
     expect(s.projects).toBe(state.projects);
-    expect(s.debugMode).toBe(true);
   });
 });
 

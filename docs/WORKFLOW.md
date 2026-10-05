@@ -21,25 +21,17 @@ The user talks with ChatGPT, normally using voice.
 
 This phase can last as many turns as required.
 
-Nothing is sent to Claude Code automatically during planning. The one exception is explicit delegation by the user: when the user's own message asks ChatGPT to send the prompt to Claude, the ready prompt is sent after a cancellable 3-second countdown (D034, can be turned off in Settings).
+Nothing is sent to Claude Code during planning; only a click on a block's *Send to Claude* button delegates (D046).
 
 ### Step 3: Produce the implementation prompt
 
 The user asks ChatGPT to produce the final prompt for Claude Code.
 
-The final implementation prompt is rendered as a distinct copyable fenced/code block designated as the Claude Prompt.
-
-Sidekick captures only the most recent designated Claude Prompt block as the candidate (a ```` ```claude-prompt ```` fenced block, or a ChatGPT writing block whose title mentions Claude — D028).
-
-Recommended ChatGPT custom instruction: "When I ask for a prompt for Claude / Claude Code, put the complete prompt in a single fenced code block with the language tag `claude-prompt` and nothing else inside it."  It does not capture the full conversation or arbitrary surrounding assistant prose.
-
-The candidate remains inspectable before execution.
+The final implementation prompt is rendered by ChatGPT as a distinct copyable fenced/code block (or writing block). Sidekick injects a *Send to Claude* button right after that block's Copy button; every prompt/code block has its own.
 
 ### Step 4: Explicitly delegate
 
-The user clicks the round *Send to Claude* button on the divider (or presses ⌘⇧↵), or has asked for it in their own ChatGPT message (D034). Sidekick captures exactly the latest designated Claude Prompt block and freezes it into a Task.
-
-A visible button is always available; the user's explicit request is only a shortcut to the same action.
+The user clicks the *Send to Claude* button of the block they want to delegate. Sidekick reads the text of exactly that block (never another block, never stored text) and freezes it into a Task. The button shows *Sent to Claude ✓* only after Claude reports (`UserPromptSubmit`) that it received the prompt; otherwise it shows *Send failed — Retry* with the reason.
 
 ### Step 5: Execute with Claude Code
 
@@ -59,13 +51,11 @@ When the turn ends, Sidekick records:
 - diff stat
 - relevant test/build evidence when available
 
-### Step 7: Offer ChatGPT review
+### Step 7: Automatic ChatGPT review (D044)
 
-Sidekick creates and persists a bounded review packet, marks it review_pending, notifies the user and enables the *Send to ChatGPT* button on the divider.
+When a managed task succeeds, Sidekick creates and persists a bounded review packet and, without a click, inserts and submits it into the ChatGPT conversation the task came from (the conversation recorded when the task was sent, in that Workspace). If the user moved to another conversation meanwhile, Sidekick navigates back to the source one first; if that is impossible it does not guess.
 
-When the user clicks it, Sidekick inserts and submits the packet into that Workspace's ChatGPT conversation.
-
-If the user does not approve yet, the packet remains locally recoverable and Claude is not rerun.
+Manual Claude turns (typed in the terminal) are not managed tasks and are never handed back. If delivery fails, the packet is kept and a compact Retry appears; Claude is never rerun.
 
 The packet asks ChatGPT to review the implementation critically.
 
@@ -87,9 +77,7 @@ Only explicit delegation creates a task.
 
 Valid triggers:
 
-- click Send to Claude
-- keyboard shortcut assigned to Send to Claude
-- the user's own latest ChatGPT message explicitly asking to send the prompt to Claude (D034; 3-second cancellable countdown)
+- click a block's Send to Claude button
 
 Invalid triggers:
 
@@ -99,9 +87,9 @@ Invalid triggers:
 - terminal becomes idle
 - a previous task finishes
 
-## 3. Candidate prompt rules
+## 3. Prompt rules
 
-The candidate prompt is the exact assistant response chosen for delegation unless the user edits it.
+The prompt is exactly the text of the clicked block.
 
 Sidekick must not silently:
 
@@ -113,15 +101,9 @@ Sidekick must not silently:
 
 Control and escape characters are removed before the prompt is pasted, so text in a ChatGPT reply cannot type extra keys into Claude.
 
-## 4. Voice-triggered send
+## 4. Voice
 
-Voice-triggered handoff is desirable but must not be implemented as uncontrolled fuzzy matching.
-
-Implemented as D034: the latest (possibly voice-transcribed) ChatGPT user message is checked against a narrow set of explicit, imperative send phrases; negation, deferral or conditions reject it. False negatives are preferred; the button is the fallback.
-
-Any voice-trigger path calls the exact same orchestration command as the button.
-
-There is never a separate privileged voice execution path.
+There is no voice or text command that sends a prompt to Claude (removed, D046). ChatGPT's voice mode only helps plan; delegating is always a click on a block's button.
 
 ## 5. Claude permissions
 
@@ -133,15 +115,13 @@ If later versions introduce permission automation, that is a separate security d
 
 ## 6. Review handback behavior
 
-When Claude's turn ends, Sidekick builds the review packet and notifies the user, but does not submit it to ChatGPT until the user clicks *Send to ChatGPT*.
+When a managed task succeeds, Sidekick builds the review packet and delivers it to the originating ChatGPT conversation automatically (D044). It waits while ChatGPT is replying or a draft is in the message box, and never overwrites a draft. There is no *Send to ChatGPT* button.
 
-On that click, Sidekick attempts the handback.
-
-If ChatGPT cannot accept the packet:
+If ChatGPT cannot accept the packet (conversation unavailable, page not ready, insertion failed):
 
 - keep task review_pending
 - retain the packet
-- show Retry review
+- show "Result delivery failed" with a compact Retry (the only manual action)
 - do not rerun Claude
 
 ## 7. Cancellation
@@ -185,7 +165,7 @@ Activating that notification selects the Workspace instantly.
 
 ## 10. Separate windows
 
-Right-click a tab → *Move to New Window* moves that Workspace into its own window (*Move to Main Window* moves it back). Moving is a visibility change only: the ChatGPT view, terminal Claude and task state are kept. Each window has its own active tab, split and relay buttons.
+Right-click a tab → *Move to New Window* moves that Workspace into its own window (*Move to Main Window* moves it back). Moving is a visibility change only: the ChatGPT view, terminal Claude and task state are kept. Each window has its own active tab and split.
 
 ## 11. Manual use of the same Claude
 
@@ -195,7 +175,7 @@ Only a delegated prompt creates a task. Manual turns do not; keystrokes and term
 
 ## 12. Completion attention behavior
 
-Implementation: tab badge (running / finished / failed), in-app toast (click selects the Workspace), OS notification when the Workspace is not the one in front (click selects it), Dock bounce and badge count on macOS while attention is pending. Selecting the Workspace clears attention; the *Send to ChatGPT* button stays available until the packet is sent.
+Implementation: tab badge (running / finished / failed), in-app toast (click selects the Workspace), OS notification when the Workspace is not the one in front (click selects it), Dock bounce and badge count on macOS while attention is pending. Selecting the Workspace clears attention. A result that could not be delivered stays available for Retry.
 
 When a task completes:
 

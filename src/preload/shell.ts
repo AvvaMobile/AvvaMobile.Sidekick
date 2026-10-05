@@ -45,39 +45,22 @@ contextBridge.exposeInMainWorld('workspace', {
   verifyGithub: (id: string) => ipcRenderer.invoke('workspace:verify-github', str(id)),
   chooseIcon: (id: string) => ipcRenderer.invoke('workspace:choose-icon', str(id)),
   getAppSettings: () => ipcRenderer.invoke('app:get-settings'),
-  updateAppSettings: (patch: unknown) => ipcRenderer.invoke('app:update-settings', patch && typeof patch === 'object' ? patch : {}),
   revealUserData: () => ipcRenderer.invoke('app:reveal-user-data'),
 
-  sendToClaude: (id: string) => ipcRenderer.invoke('handoff:send', str(id)),
-  cancelAutoSend: (id: string) => ipcRenderer.invoke('handoff:cancel-auto', str(id)),
   cancelTask: (id: string) => ipcRenderer.invoke('task:cancel', str(id)),
   resetSession: (id: string) => ipcRenderer.invoke('session:reset', str(id)),
-  responseInfo: (id: string) => ipcRenderer.invoke('response:info', str(id)),
-  // target: 'auto' | 'full' | { block: n }; validated in the main process.
-  copyResponse: (id: string, target: unknown) => ipcRenderer.invoke('response:copy', str(id), target),
-  sendReview: (id: string, taskId: string) => ipcRenderer.invoke('review:send', str(id), str(taskId)),
+  retryReview: (id: string, taskId: string) => ipcRenderer.invoke('review:retry', str(id), str(taskId)),
 
   terminalInput: (id: string, data: string) => ipcRenderer.send('terminal:input', { workspaceId: str(id), data: str(data) }),
   terminalResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.send('terminal:resize', { workspaceId: str(id), cols: Math.floor(Number(cols)), rows: Math.floor(Number(rows)) }),
   terminalRestart: (id: string) => ipcRenderer.invoke('terminal:restart', str(id)),
-  setRelayState: (state: unknown) => ipcRenderer.send('relay:set-state', state),
   openCoffee: () => ipcRenderer.invoke('app:open-coffee'),
   checkSetup: () => ipcRenderer.invoke('app:check-setup'),
   openSetupLink: (key: string) => ipcRenderer.invoke('app:open-setup-link', str(key)),
   requestMicrophone: () => ipcRenderer.invoke('app:request-microphone'),
   setSplit: (id: string, ratio: number, commit: boolean) => ipcRenderer.send('layout:set-split', { workspaceId: str(id), ratio: Number(ratio), commit: commit === true }),
-  setLayoutMode: (id: string, mode: string) => ipcRenderer.send('layout:set-mode', { workspaceId: str(id), mode: str(mode) }),
-
-  diagnostics: {
-    state: () => ipcRenderer.invoke('diag:state'),
-    capture: () => ipcRenderer.invoke('diag:capture'),
-    latestUser: () => ipcRenderer.invoke('diag:latest-user'),
-    micStatus: () => ipcRenderer.invoke('diag:mic-status'),
-    home: () => ipcRenderer.invoke('diag:home'),
-    insert: (text: string) => ipcRenderer.invoke('diag:insert', str(text)),
-    submit: () => ipcRenderer.invoke('diag:submit'),
-  },
+  setViewMode: (id: string, mode: string) => ipcRenderer.send('layout:set-view', { workspaceId: str(id), mode: str(mode) }),
 
   onState: (cb: (s: unknown) => void) => subscribe(PUSH.state, cb),
   onTerminalData: (cb: (e: unknown) => void) => subscribe(PUSH.terminalData, cb),

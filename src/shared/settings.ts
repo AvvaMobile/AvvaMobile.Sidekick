@@ -42,17 +42,10 @@ export interface ProjectSettingsPatch {
 }
 
 export interface AppSettings {
-  autoSendOnRequest: boolean;
-  developerMode: boolean;
   /** Read-only: Claude Code's default model from ~/.claude/settings.json (null when unset or not a known choice). */
   defaultModel: ModelChoice | null;
   version: string;
   userDataPath: string;
-}
-
-export interface AppSettingsPatch {
-  autoSendOnRequest?: boolean;
-  developerMode?: boolean;
 }
 
 /** Which settings screen a shell window should show (pushed by the main process). */

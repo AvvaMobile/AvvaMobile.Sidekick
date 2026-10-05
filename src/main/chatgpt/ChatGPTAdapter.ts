@@ -1,24 +1,26 @@
 import type { WebContents } from 'electron';
-import { isChatGptAppUrl, isChatGptConversationUrl } from '../security/origins';
+import { conversationUrlToStore, isChatGptAppUrl, isChatGptConversationUrl, sameConversationUrl } from '../security/origins';
 import {
-  CLAUDE_PROMPT_LANGUAGE,
   SELECTORS,
   clickSendScript,
   composerTextScript,
   focusComposerScript,
-  latestClaudePromptBlockScript,
-  latestMessageTextScript,
+  installBlockSendButtonsScript,
+  takeBlockSendsScript,
+  setBlockSendStatusScript,
   pageStateScript,
   scriptCall,
+  type BlockSendRequest,
+  type BlockSendState,
+  type TakeBlockSendsResult,
   type PageScript,
-  type LatestTextResult,
   type PageState,
 } from './pageScripts';
 
 /** Isolated world id for Workspace adapter scripts (page JS cannot see this world's globals). */
 const ADAPTER_WORLD_ID = 1001;
 const DEFAULT_TIMEOUT_MS = 5_000;
-export const MAX_PROMPT_CHARS = 100_000;
+const MAX_PROMPT_CHARS = 100_000;
 
 export type AdapterErrorCode =
   | 'view_unavailable'
@@ -31,19 +33,12 @@ export type AdapterErrorCode =
   | 'send_button_not_found'
   | 'send_button_disabled'
   | 'still_generating'
-  | 'no_assistant_messages'
-  | 'no_prompt_block'
-  | 'not_found';
+  /** The conversation a result belongs to is unknown or could not be opened. */
+  | 'conversation_unavailable';
 
 export type AdapterResult<T> = { ok: true; value: T } | { ok: false; code: AdapterErrorCode; detail: string };
 
-export interface ClaudePromptCandidate {
-  text: string;
-  messageId: string | null;
-  conversationUrl: string | null;
-  truncated: boolean;
-  capturedAt: string;
-}
+export type { BlockSendRequest, BlockSendState };
 
 /**
  * The only component that knows how to talk to the ChatGPT page. All DOM knowledge is in pageScripts.ts.
@@ -55,42 +50,60 @@ export class ChatGPTAdapter {
   getConversationUrl(): string | null {
     if (this.wc.isDestroyed()) return null;
     const url = this.wc.getURL();
-    return isChatGptConversationUrl(url) ? url : null;
+    // Origin and path only: a query or fragment can carry tokens and is never stored.
+    return isChatGptConversationUrl(url) ? conversationUrlToStore(url) : null;
+  }
+
+  /**
+   * Makes sure the view shows exactly `expectedUrl` (the conversation a managed task started from) before
+   * anything is inserted. Already there: nothing happens. Elsewhere in the same Workspace: navigates back
+   * and waits for the composer. Anything uncertain fails; the caller never guesses another conversation.
+   */
+  async ensureConversation(expectedUrl: string | null): Promise<AdapterResult<{ restored: boolean }>> {
+    if (!expectedUrl || !isChatGptConversationUrl(expectedUrl)) return { ok: false, code: 'conversation_unavailable', detail: 'The source conversation is unknown' };
+    if (this.wc.isDestroyed()) return { ok: false, code: 'view_unavailable', detail: 'ChatGPT view destroyed' };
+    if (sameConversationUrl(this.wc.getURL(), expectedUrl)) return { ok: true, value: { restored: false } };
+    try {
+      await this.wc.loadURL(conversationUrlToStore(expectedUrl));
+    } catch (err) {
+      return { ok: false, code: 'conversation_unavailable', detail: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
+    }
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (this.wc.isDestroyed()) return { ok: false, code: 'view_unavailable', detail: 'ChatGPT view destroyed' };
+      if (!sameConversationUrl(this.wc.getURL(), expectedUrl)) return { ok: false, code: 'conversation_unavailable', detail: 'ChatGPT did not open the source conversation' };
+      const composer = await this.run(scriptCall(composerTextScript, { sel: SELECTORS }));
+      if (composer.ok && composer.value.ok) return { ok: true, value: { restored: true } };
+      await delay(500);
+    }
+    return { ok: false, code: 'conversation_unavailable', detail: 'The source conversation did not become ready' };
   }
 
   async getPageState(): Promise<AdapterResult<PageState>> {
     return this.run(scriptCall(pageStateScript, SELECTORS));
   }
 
-  async getLatestClaudePromptBlock(): Promise<AdapterResult<ClaudePromptCandidate>> {
-    const res = await this.run(
-      scriptCall(latestClaudePromptBlockScript, { sel: SELECTORS, language: CLAUDE_PROMPT_LANGUAGE, maxChars: MAX_PROMPT_CHARS }),
-    );
-    if (!res.ok) return res;
-    const r = res.value;
-    if (!r.ok) return { ok: false, code: r.code, detail: r.detail };
-    return {
-      ok: true,
-      value: {
-        text: r.text,
-        messageId: r.messageId,
-        conversationUrl: this.getConversationUrl(),
-        truncated: r.truncated,
-        capturedAt: new Date().toISOString(),
-      },
-    };
+  /** Injects the per-block "Send to Claude" buttons (idempotent per document). */
+  async installBlockSendButtons(): Promise<AdapterResult<{ installed: boolean }>> {
+    const res = await this.run(scriptCall(installBlockSendButtonsScript, { sel: SELECTORS, maxChars: MAX_PROMPT_CHARS, trustedOnly: true }));
+    return res.ok ? { ok: true, value: { installed: res.value.installed } } : res;
   }
 
-  async getLatestUserMessage(maxChars = 2_000): Promise<AdapterResult<LatestTextResult & { ok: true }>> {
-    return this.latestText(SELECTORS.userMessage, maxChars);
+  /** Takes the clicks on block buttons since the last call; `installed: false` means the page was reloaded (reinstall). */
+  async takeBlockSends(): Promise<AdapterResult<TakeBlockSendsResult>> {
+    return this.run(scriptCall(takeBlockSendsScript, undefined as void), 2_000);
+  }
+
+  /** Shows a click's outcome on its own button. */
+  async setBlockSendStatus(id: string, state: BlockSendState, detail: string): Promise<AdapterResult<{ found: boolean }>> {
+    return this.run(scriptCall(setBlockSendStatusScript, { id, state, detail }), 2_000);
   }
 
   /**
    * Inserts text into the composer using native text input (webContents.insertText).
-   * Refuses to overwrite a draft the user is typing unless allowNonEmpty is set.
+   * Never overwrites a draft the user is typing (`composer_not_empty`).
    */
-  async insertComposerText(text: string, opts: { allowNonEmpty?: boolean } = {}): Promise<AdapterResult<{ inserted: number }>> {
-    const focus = await this.run(scriptCall(focusComposerScript, { sel: SELECTORS, requireEmpty: !opts.allowNonEmpty }));
+  async insertComposerText(text: string): Promise<AdapterResult<{ inserted: number }>> {
+    const focus = await this.run(scriptCall(focusComposerScript, { sel: SELECTORS, requireEmpty: true }));
     if (!focus.ok) return focus;
     if (!focus.value.ok) return { ok: false, code: focus.value.code, detail: focus.value.detail };
     if (!this.wc.isFocused()) this.wc.focus();
@@ -113,13 +126,6 @@ export class ChatGPTAdapter {
       await delay(150);
     }
     return { ok: false, code: 'send_button_disabled', detail: 'send button stayed disabled' };
-  }
-
-  private async latestText(selector: string, maxChars: number): Promise<AdapterResult<LatestTextResult & { ok: true }>> {
-    const res = await this.run(scriptCall(latestMessageTextScript, { selector, maxChars }));
-    if (!res.ok) return res;
-    if (!res.value.ok) return { ok: false, code: 'not_found', detail: res.value.detail };
-    return { ok: true, value: res.value };
   }
 
   private async run<T>(code: PageScript<T>, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<AdapterResult<T>> {

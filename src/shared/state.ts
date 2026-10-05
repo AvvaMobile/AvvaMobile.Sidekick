@@ -1,4 +1,4 @@
-import type { LayoutMode } from '../domain/layout/splitPane';
+import type { ViewMode } from '../domain/layout/viewMode';
 import type { EffortChoice, ModelChoice } from './models';
 /**
  * Serializable view state shared by the main process and the trusted shell renderer.
@@ -21,13 +21,6 @@ export type TaskOutcome = 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
 
 export type AttentionState = 'none' | 'completed' | 'failed';
 
-export interface CandidateView {
-  text: string;
-  messageId: string | null;
-  /** Same prompt text as the Workspace's most recent task. */
-  alreadySent: boolean;
-}
-
 export interface ReviewView {
   status: 'pending' | 'sending' | 'sent' | 'failed';
   lastError: string | null;
@@ -49,26 +42,6 @@ export interface TaskView {
   review: ReviewView | null;
 }
 
-/** One step of the ChatGPT <-> Claude flow, as observed (passively) or performed (buttons). */
-export type FlowKind =
-  | 'chatgpt_started' // ChatGPT began writing a reply
-  | 'chatgpt_replied' // ChatGPT finished its reply
-  | 'prompt_ready' // a Claude Prompt block is ready to send
-  | 'sent_to_claude'
-  | 'claude_finished' // Claude's turn ended (managed task or the user's own run in the terminal)
-  | 'review_sent' // review packet handed to ChatGPT
-  | 'review_failed';
-
-export interface FlowEntry {
-  seq: number;
-  at: string;
-  kind: FlowKind;
-  /** Short human text (first line of a prompt, outcome, error). */
-  detail: string;
-  /** ChatGPT message the entry refers to (dedupes `prompt_ready` across restarts). */
-  messageId?: string | null;
-}
-
 export interface WorkspaceView {
   id: string;
   name: string;
@@ -83,17 +56,13 @@ export interface WorkspaceView {
   /** Effort level of the terminal's Claude Code (the explicit choice; null = Claude Code's own default). */
   effort: EffortChoice | null;
   splitRatio: number;
-  layoutMode: LayoutMode;
+  /** This Workspace's view: ChatGPT Focus / Split / Claude Focus. */
+  viewMode: ViewMode;
   attention: AttentionState;
-  chatgpt: { generating: boolean; loggedIn: boolean | null };
-  candidate: CandidateView | null;
-  /** Send to Claude is capturing the prompt right now. */
-  sending: boolean;
+  chatgpt: { loggedIn: boolean | null };
   task: TaskView | null;
   latestReview: LatestReviewView | null;
   terminal: { running: boolean; error: string | null };
-  /** The user asked ChatGPT to send the prompt to Claude: it is sent at `at` (ISO) unless cancelled (D034). */
-  autoSend: { at: string } | null;
 }
 
 /** One row of the Projects start page: every saved Workspace, open in a tab or not. */
@@ -110,7 +79,6 @@ export interface ShellState {
   /** All saved Workspaces, most recently opened first. */
   projects: ProjectEntry[];
   activeWorkspaceId: string | null;
-  debugMode: boolean;
 }
 
 export interface ToastMessage {
@@ -124,18 +92,7 @@ export interface ToastMessage {
 /** Support link (Help menu and the one-time popup). Opened by main only; the renderer never passes a URL. */
 export const BUY_ME_A_COFFEE_URL = 'https://buymeacoffee.com/muratyilmaz';
 
-export type ShellCommand = 'send-to-claude' | 'send-review' | 'coffee-prompt' | 'setup-prompt' | 'new-workspace' | 'projects-opened' | 'fullscreen-enter' | 'fullscreen-leave';
-
-/** The two round relay buttons that sit on the ChatGPT/development divider (their own overlay view). */
-export interface RelayButtonState {
-  enabled: boolean;
-  title: string;
-}
-export interface RelayState {
-  claude: RelayButtonState;
-  chatgpt: RelayButtonState;
-}
-export type RelayButton = keyof RelayState;
+export type ShellCommand = 'coffee-prompt' | 'setup-prompt' | 'new-workspace' | 'projects-opened' | 'fullscreen-enter' | 'fullscreen-leave';
 
 /** Fixed IPC channel names for the shell preload (no generic channel access). */
 export const SHELL_CHANNELS = {

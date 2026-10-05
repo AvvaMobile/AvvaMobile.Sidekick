@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { computeLayoutGeometry, computeSplitGeometry, isGptHidden, isTerminalHidden, ratioFromPointer } from '../../domain/layout/splitPane';
+import { ratioFromPointer } from '../../domain/layout/splitPane';
+import { computeViewGeometry } from '../../domain/layout/viewMode';
 import { workAreaFor } from '../../shared/shellLayout';
 import type { SettingsTarget } from '../../shared/settings';
 import type { ShellState, ToastMessage } from '../../shared/state';
 import type { WorkspaceApi } from './api';
+import { ClaudeStatusBar } from './components/ClaudeStatusBar';
 import { DevPane, type DevPaneActions } from './components/DevPane';
 import { AppSettings } from './components/AppSettings';
 import { CoffeeDialog } from './components/CoffeeDialog';
@@ -13,9 +15,8 @@ import { ProjectSettings } from './components/ProjectSettings';
 import { StartPage } from './components/StartPage';
 import { TabBar } from './components/TabBar';
 import { disposeTerminal, terminalData } from './terminals';
-import { needsReviewDecision, relayState } from './viewModel';
 
-const EMPTY: ShellState = { workspaces: [], projects: [], activeWorkspaceId: null, debugMode: false };
+const EMPTY: ShellState = { workspaces: [], projects: [], activeWorkspaceId: null };
 
 function useWindowSize() {
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
@@ -42,7 +43,6 @@ export function App({ api }: { api: WorkspaceApi }) {
   }, []);
   const closeDialog = useCallback(() => setDialog(queuedDialogs.current.shift() ?? null), []);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [busy, setBusy] = useState(false);
   const [showStart, setShowStart] = useState(false);
   const [settings, setSettings] = useState<SettingsTarget | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -113,34 +113,17 @@ export function App({ api }: { api: WorkspaceApi }) {
 
   const actions: DevPaneActions = useMemo(
     () => ({
-      sendToClaude: async (id) => {
-        setBusy(true);
-        try {
-          const r = await api.sendToClaude(id);
-          if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Claude not started', body: r.detail ?? 'No Claude Prompt block found' });
-        } finally {
-          setBusy(false);
-        }
-      },
-      cancelAutoSend: (id) => void api.cancelAutoSend(id),
       cancelTask: (id) => void api.cancelTask(id),
       resetSession: (id) =>
         void api.resetSession(id).then((r) => {
           if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Session not reset', body: r.detail ?? '' });
         }),
-      sendReview: (id, taskId) =>
-        void api.sendReview(id, taskId).then((r) => {
-          if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Review not sent', body: r.detail ?? '' });
+      retryReview: (id, taskId) =>
+        void api.retryReview(id, taskId).then((r) => {
+          if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Result not delivered', body: r.detail ?? '' });
         }),
       restartTerminal: (id) => void api.terminalRestart(id),
       clearTerminal: (id) => api.terminalInput(id, '/clear\r'),
-      responseInfo: (id) => api.responseInfo(id),
-      copyResponse: async (id, target) => {
-        const r = await api.copyResponse(id, target);
-        if (r.ok) toast({ workspaceId: id, kind: 'success', title: r.kind === 'code' ? 'Code copied' : 'Response copied', body: '' });
-        else if (r.code !== 'choose') toast({ workspaceId: id, kind: 'error', title: 'Nothing copied', body: ('detail' in r && r.detail) || 'Copy failed.' });
-        return r.ok ? { ok: true } : r.code === 'choose' && 'blocks' in r ? { ok: false, blocks: r.blocks } : { ok: false };
-      },
       setModel: (id, model) =>
         void api.setModel(id, model).then((r) => {
           if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Model not changed', body: r.detail ?? '' });
@@ -168,27 +151,17 @@ export function App({ api }: { api: WorkspaceApi }) {
         if (c === 'setup-prompt') queueDialog('setup');
         if (c === 'fullscreen-enter') setFullscreen(true);
         if (c === 'fullscreen-leave') setFullscreen(false);
-        if (c === 'send-to-claude' && active) void actions.sendToClaude(active.id);
-        if (c === 'send-review' && active?.latestReview) void actions.sendReview(active.id, active.latestReview.taskId);
       }),
     [api, active, actions, queueDialog],
   );
-
-  // The divider's round relay buttons are drawn by main's overlay view; it only needs their state.
-  const relay = relayState(active, busy);
-  const relayKey = JSON.stringify(relay);
-  useEffect(() => api.setRelayState(JSON.parse(relayKey)), [api, relayKey]);
 
   // ---------- Split geometry (shared with main, D023) ----------
   const area = workAreaFor(size.w, size.h);
   const ratio = dragRatio ?? active?.splitRatio ?? 0.6;
   // Dragging the divider turns the layout custom immediately (main persists it on release).
-  const layoutMode = dragRatio !== null ? 'custom' : (active?.layoutMode ?? 'custom');
-  const geo = computeLayoutGeometry(area, layoutMode, ratio);
-  const gptHidden = isGptHidden(layoutMode);
-  const terminalHidden = isTerminalHidden(layoutMode);
-  // A hidden terminal keeps a real size (offscreen-free, just invisible) so xterm/PTY never reflow to ~0 columns.
-  const devFrame = terminalHidden ? computeSplitGeometry(area, ratio).devPane : geo.devPane;
+  const viewMode = active?.viewMode ?? 'split';
+  const view = computeViewGeometry(area, viewMode, ratio);
+  const devFrame = view.devPane;
   const dragging = useRef(false);
   const frame = useRef(0);
   const latest = useRef(ratio);
@@ -254,8 +227,8 @@ export function App({ api }: { api: WorkspaceApi }) {
           setShowStart(true);
         }}
         onCloseStart={() => setShowStart(false)}
-        layoutMode={!settings && active ? layoutMode : null}
-        onLayout={(mode) => active && api.setLayoutMode(active.id, mode)}
+        viewMode={!settings && active ? viewMode : null}
+        onViewMode={(mode) => active && api.setViewMode(active.id, mode)}
       />
 
       {settings ? (
@@ -268,30 +241,39 @@ export function App({ api }: { api: WorkspaceApi }) {
         </div>
       ) : active ? (
         <>
-          {!gptHidden && (
-          <div className="chat-placeholder" style={{ left: geo.chatgpt.x, top: geo.chatgpt.y, width: geo.chatgpt.width, height: geo.chatgpt.height }}>
-            Loading ChatGPT…
-          </div>
+          {view.chatgpt && (
+            <div className="chat-placeholder" style={{ left: view.chatgpt.x, top: view.chatgpt.y, width: view.chatgpt.width, height: view.chatgpt.height }}>
+              Loading ChatGPT…
+            </div>
           )}
-          {!gptHidden && !terminalHidden && (
-          <div
-            className="splitter"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize ChatGPT and development panes"
-            style={{ left: geo.splitter.x, top: geo.splitter.y, width: geo.splitter.width, height: geo.splitter.height }}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
-          />
+          {view.splitter && (
+            <div
+              className="splitter"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize ChatGPT and development panes"
+              style={{ left: view.splitter.x, top: view.splitter.y, width: view.splitter.width, height: view.splitter.height }}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+            />
           )}
           <div
             className="devpane-frame"
-            style={{ left: devFrame.x, top: devFrame.y, width: devFrame.width, height: devFrame.height, ...(terminalHidden ? { visibility: 'hidden', pointerEvents: 'none' } : {}) }}
+            style={{ left: devFrame.x, top: devFrame.y, width: devFrame.width, height: devFrame.height, ...(view.devPaneVisible ? {} : { visibility: 'hidden', pointerEvents: 'none' }) }}
           >
-            <DevPane workspaces={state.workspaces} active={active} debugMode={state.debugMode} actions={actions} diagnostics={api.diagnostics} />
+            <DevPane workspaces={state.workspaces} active={active} actions={actions} />
           </div>
+          {view.statusBar && (
+            <ClaudeStatusBar
+              active={active}
+              style={{ left: view.statusBar.x, top: view.statusBar.y, width: view.statusBar.width, height: view.statusBar.height }}
+              onRetry={() => active.latestReview && actions.retryReview(active.id, active.latestReview.taskId)}
+              onStop={() => actions.cancelTask(active.id)}
+              onOpenClaude={() => api.setViewMode(active.id, 'claude-focus')}
+            />
+          )}
         </>
       ) : (
         <div className="start-frame" style={{ left: area.x, top: area.y }}>

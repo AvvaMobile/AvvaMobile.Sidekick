@@ -8,7 +8,6 @@ import type { DevPaneActions } from '../components/DevPane';
 vi.mock('../terminals', () => ({ ensureTerminal: vi.fn(), showTerminal: vi.fn(), fitTerminal: vi.fn(), terminalData: vi.fn(), disposeTerminal: vi.fn() }));
 
 const { DevPane } = await import('../components/DevPane');
-const { sendState } = await import('../viewModel');
 const { TabBar } = await import('../components/TabBar');
 const { StartPage } = await import('../components/StartPage');
 
@@ -30,35 +29,25 @@ function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
     model: 'opus',
     effort: null,
     splitRatio: 0.6,
-    layoutMode: 'custom',
+    viewMode: 'split',
     attention: 'none',
-    chatgpt: { generating: false, loggedIn: true },
-    candidate: null,
-    sending: false,
+    chatgpt: { loggedIn: true },
     task: null,
     latestReview: null,
     terminal: { running: true, error: null },
-    autoSend: null,
     ...over,
   };
 }
 
-const DIAG_LABELS = ['Page state', 'Capture Claude Prompt', 'Latest user msg', 'Mic status', 'Home', 'Insert into composer', 'Submit'];
-
 const actions = () => ({
-  sendToClaude: vi.fn(),
-  cancelAutoSend: vi.fn(),
   cancelTask: vi.fn(),
   resetSession: vi.fn(),
-  sendReview: vi.fn(),
+  retryReview: vi.fn(),
   restartTerminal: vi.fn(),
   setModel: vi.fn(),
   setEffort: vi.fn(),
   clearTerminal: vi.fn(),
-  responseInfo: vi.fn(async () => ({ available: true, blocks: [] })),
-  copyResponse: vi.fn<DevPaneActions['copyResponse']>(async () => ({ ok: true })),
 });
-const diag = { state: vi.fn(), capture: vi.fn(), latestUser: vi.fn(), micStatus: vi.fn(), home: vi.fn(), submit: vi.fn(), insert: vi.fn() };
 
 describe('development pane UI', () => {
   let root: Root;
@@ -73,8 +62,8 @@ describe('development pane UI', () => {
     host.remove();
   });
 
-  const render = (list: WorkspaceView[], activeId: string, debugMode = false, a = actions()) => {
-    act(() => root.render(<DevPane workspaces={list} active={list.find((w) => w.id === activeId)!} debugMode={debugMode} actions={a} diagnostics={diag} />));
+  const render = (list: WorkspaceView[], activeId: string, a = actions()) => {
+    act(() => root.render(<DevPane workspaces={list} active={list.find((w) => w.id === activeId)!} actions={a} />));
     return a;
   };
   const buttonLabels = () => Array.from(host.querySelectorAll('button')).map((b) => b.textContent?.trim());
@@ -106,7 +95,7 @@ describe('development pane UI', () => {
     expect(a.setEffort).toHaveBeenLastCalledWith('a', null);
   });
 
-  it('while a task runs only STOP reflects it: model, effort and Copy stay usable', () => {
+  it('while a task runs only STOP reflects it: model and effort stay usable', () => {
     const a = render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
     expect(buttonLabels()).toContain('Stop');
     expect((host.querySelector('select.effort-select') as HTMLSelectElement).disabled).toBe(false);
@@ -114,7 +103,6 @@ describe('development pane UI', () => {
     expect(byText('Sonnet').disabled).toBe(false);
     act(() => byText('Sonnet').click());
     expect(a.setModel).toHaveBeenCalledWith('a', 'sonnet'); // applied to the next turn by the main process
-    expect(byText('Copy').disabled).toBe(false);
   });
 
   it('STOP is not shown once the task is no longer active', () => {
@@ -133,75 +121,15 @@ describe('development pane UI', () => {
     expect(clear().disabled).toBe(true);
   });
 
-  it('Copy copies the last response through the app (never /copy in the terminal), even while a task runs', () => {
-    const a = render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
-    act(() => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Copy') as HTMLButtonElement).click());
-    expect(a.copyResponse).toHaveBeenCalledWith('a', 'auto');
-    expect(a).not.toHaveProperty('copyTerminal');
-  });
-
-  it('several code blocks open a selection menu; picking one copies that block, "Full response" copies all', async () => {
-    const a = render([ws('a')], 'a');
-    a.copyResponse.mockResolvedValueOnce({ ok: false, blocks: [{ language: 'bash', preview: 'ls' }, { language: null, preview: 'x' }] });
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Copy') as HTMLButtonElement).click());
-    expect(buttonLabels()).toEqual(expect.arrayContaining(['Code block 1 — bash', 'Code block 2', 'Full response']));
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Code block 2') as HTMLButtonElement).click());
-    expect(a.copyResponse).toHaveBeenLastCalledWith('a', { block: 1 });
-    expect(buttonLabels()).not.toContain('Full response');
-  });
-
-  it('the ▾ option copies the full response when there is a single block', async () => {
-    const a = render([ws('a')], 'a');
-    await act(async () => (host.querySelector('button[aria-label="More copy options"]') as HTMLButtonElement).click());
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Copy full response') as HTMLButtonElement).click());
-    expect(a.copyResponse).toHaveBeenLastCalledWith('a', 'full');
-  });
-
-  it('debug controls are hidden in normal mode', () => {
-    render([ws('a')], 'a', false);
-    for (const l of DIAG_LABELS) expect(buttonLabels()).not.toContain(l);
-    expect(host.querySelector('[data-testid="diagnostics"]')).toBeNull();
-    expect(buttonLabels()).not.toContain('Diagnostics');
-  });
-
-  it('debug controls are reachable only when Developer → Diagnostics is on', () => {
-    render([ws('a')], 'a', true);
-    const tab = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Diagnostics')!;
-    act(() => tab.click());
-    expect(host.querySelector('[data-testid="diagnostics"]')).not.toBeNull();
-    expect(buttonLabels()).toContain('Capture Claude Prompt');
-  });
-
   it('the terminal is the pane (no preview dialog)', () => {
-    render([ws('a', { candidate: { text: 'do it', messageId: 'm', alreadySent: false } })], 'a');
+    render([ws('a')], 'a');
     expect(host.querySelector('[role="dialog"]')).toBeNull();
     expect(buttonLabels().some((l) => l?.startsWith('Run in Claude'))).toBe(false);
     expect((host.querySelector('.terminal-wrap') as HTMLElement).style.display).toBe('flex');
     expect(buttonLabels()).not.toContain('Claude');
   });
 
-  it('shows a live auto-send countdown with Cancel', () => {
-    vi.useFakeTimers();
-    try {
-      const at = new Date(Date.now() + 3_000).toISOString();
-      const a = render([ws('a', { autoSend: { at } })], 'a');
-      const bar = () => host.querySelector('.auto-send-bar');
-      expect(bar()?.textContent).toContain('Sending to Claude in 3 s');
-      expect(bar()?.textContent).toContain('you asked ChatGPT to send it');
-      act(() => {
-        vi.advanceTimersByTime(1_100);
-      });
-      expect(bar()?.textContent).toContain('Sending to Claude in 2 s');
-      act(() => (Array.from(bar()!.querySelectorAll('button')).find((b) => b.textContent === 'Cancel') as HTMLButtonElement).click());
-      expect(a.cancelAutoSend).toHaveBeenCalledWith('a');
-      render([ws('a')], 'a', false, a);
-      expect(bar()).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('shows no review bar in the pane (review handback lives on the relay button)', () => {
+  it('shows no review bar while the delivery is pending or sent (only a failed delivery shows Retry)', () => {
     const task = {
       id: 't1',
       status: 'review_pending' as const,
@@ -212,33 +140,37 @@ describe('development pane UI', () => {
       review: { status: 'pending' as const, lastError: null, body: 'packet' },
     };
     const a = render([ws('a', { task })], 'a');
-    expect(a.sendReview).not.toHaveBeenCalled();
+    expect(a.retryReview).not.toHaveBeenCalled();
     expect(host.querySelector('.review-bar')).toBeNull();
     expect(buttonLabels()).not.toContain('Send to ChatGPT for review');
     expect(buttonLabels()).not.toContain('Not now');
   });
 });
 
-describe('layout presets in the tab bar', () => {
-  const render = (layoutMode: Parameters<typeof TabBar>[0]['layoutMode'], onLayout = vi.fn()) => {
+describe('view buttons in the tab bar', () => {
+  const render = (viewMode: Parameters<typeof TabBar>[0]['viewMode'], onViewMode = vi.fn()) => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
-    act(() => root.render(<TabBar workspaces={[ws('a')]} activeId="a" onSelect={vi.fn()} onReorder={vi.fn()} onContextMenu={vi.fn()} onNew={vi.fn()} onClose={vi.fn()} startOpen={false} onSelectStart={vi.fn()} onCloseStart={vi.fn()} layoutMode={layoutMode} onLayout={onLayout} />));
-    return { host, onLayout };
+    act(() => root.render(<TabBar workspaces={[ws('a')]} activeId="a" onSelect={vi.fn()} onReorder={vi.fn()} onContextMenu={vi.fn()} onNew={vi.fn()} onClose={vi.fn()} startOpen={false} onSelectStart={vi.fn()} onCloseStart={vi.fn()} viewMode={viewMode} onViewMode={onViewMode} />));
+    return { host, onViewMode };
   };
 
-  it('shows five buttons with tooltips, marks only the active preset and reports clicks', () => {
-    const { host, onLayout } = render('split-50-50');
+  it('shows exactly three buttons with tooltips, marks only the current view and reports clicks', () => {
+    const { host, onViewMode } = render('split');
     const btns = Array.from(host.querySelectorAll<HTMLButtonElement>('.layout-btn'));
-    expect(btns.map((b) => b.title)).toEqual(['Terminal only', 'GPT 20 / Terminal 80', 'GPT 50 / Terminal 50', 'GPT 80 / Terminal 20', 'GPT only']);
-    expect(btns.map((b) => b.classList.contains('selected'))).toEqual([false, false, true, false, false]);
-    act(() => btns[3]!.click());
-    expect(onLayout).toHaveBeenCalledWith('split-80-20');
+    expect(btns.map((b) => b.title)).toEqual(['ChatGPT Focus', 'Split View', 'Claude Focus']);
+    expect(btns.map((b) => b.classList.contains('selected'))).toEqual([false, true, false]);
+    act(() => btns[2]!.click());
+    expect(onViewMode).toHaveBeenCalledWith('claude-focus');
+    act(() => btns[0]!.click());
+    expect(onViewMode).toHaveBeenCalledWith('chatgpt-focus');
   });
 
-  it('selects no preset for a custom split and renders nothing without an active Workspace', () => {
-    expect(render('custom').host.querySelectorAll('.layout-btn.selected')).toHaveLength(0);
+  it('has no preset, Grid or Overview controls, and renders nothing without an active Workspace', () => {
+    const { host } = render('chatgpt-focus');
+    const labels = Array.from(host.querySelectorAll('button')).map((b) => b.getAttribute('aria-label') ?? b.textContent ?? '');
+    expect(labels.some((l) => /GPT \d|Terminal only|GPT only|Grid|Overview/.test(l))).toBe(false);
     expect(render(null).host.querySelector('.layout-presets')).toBeNull();
   });
 });
@@ -251,7 +183,7 @@ describe('workspace tabs', () => {
     const onContextMenu = vi.fn();
     const onClose = vi.fn();
     const list = [ws('a', { iconUrl: 'data:image/png;base64,AAAA' }), ws('b')];
-    act(() => root.render(<TabBar workspaces={list} activeId="a" onSelect={vi.fn()} onReorder={vi.fn()} onContextMenu={onContextMenu} onNew={vi.fn()} onClose={onClose} startOpen={false} onSelectStart={vi.fn()} onCloseStart={vi.fn()} layoutMode={null} onLayout={vi.fn()} />));
+    act(() => root.render(<TabBar workspaces={list} activeId="a" onSelect={vi.fn()} onReorder={vi.fn()} onContextMenu={onContextMenu} onNew={vi.fn()} onClose={onClose} startOpen={false} onSelectStart={vi.fn()} onCloseStart={vi.fn()} viewMode={null} onViewMode={vi.fn()} />));
     const [a, b] = Array.from(host.querySelectorAll('.tab'));
     expect(a!.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AAAA');
     expect(a!.querySelector('.tab-dot')).toBeNull();
@@ -305,17 +237,5 @@ describe('Projects start page', () => {
     expect(onCreate).toHaveBeenCalled();
     act(() => root.unmount());
     host.remove();
-  });
-});
-
-describe('sendState', () => {
-  it('disabled while running, generating or without candidate', () => {
-    const cand = { text: 'x', messageId: null, alreadySent: false };
-    expect(sendState(null).enabled).toBe(false);
-    expect(sendState(ws('a')).enabled).toBe(false);
-    expect(sendState(ws('a', { candidate: cand })).enabled).toBe(true);
-    expect(sendState(ws('a', { candidate: cand, chatgpt: { generating: true, loggedIn: true } })).enabled).toBe(false);
-    const running = { id: 't', status: 'running' as const, outcome: null, prompt: '', createdAt: '', error: null, review: null };
-    expect(sendState(ws('a', { candidate: cand, task: running })).enabled).toBe(false);
   });
 });

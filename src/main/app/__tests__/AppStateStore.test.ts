@@ -39,19 +39,68 @@ describe('AppStateStore', () => {
     expect(r.get().activeWorkspaceId).toBe('b');
   });
 
-  it('persists layout mode per Workspace; records without one migrate to custom keeping their ratio', () => {
+  it('persists the view per Workspace; records without one default to Split', () => {
     const file = tmpFile();
     const s = new AppStateStore(file, 0);
     s.addWorkspace(ws('a'));
     s.addWorkspace(ws('b'));
-    s.setSplitRatio('a', 0.37);
-    s.setLayoutMode('b', 'split-80-20');
+    s.addWorkspace(ws('c'));
+    s.setViewMode('a', 'chatgpt-focus');
+    s.setViewMode('b', 'claude-focus');
+    s.setViewMode('c', 'bogus' as never);
     const r = new AppStateStore(file, 0);
-    expect(r.getLayoutMode('a')).toBe('custom');
-    expect(r.getSplitRatio('a')).toBe(0.37);
-    expect(r.getLayoutMode('b')).toBe('split-80-20');
-    s.setLayoutMode('a', 'bogus' as never);
-    expect(new AppStateStore(file, 0).getLayoutMode('a')).toBe('custom');
+    expect(['a', 'b', 'c'].map((id) => r.getViewMode(id))).toEqual(['chatgpt-focus', 'claude-focus', 'split']);
+  });
+
+  it('changing the view never touches the saved split ratio', () => {
+    const file = tmpFile();
+    const s = new AppStateStore(file, 0);
+    s.addWorkspace(ws('a'));
+    s.setSplitRatio('a', 0.72);
+    s.setViewMode('a', 'claude-focus');
+    s.setViewMode('a', 'chatgpt-focus');
+    s.setViewMode('a', 'split');
+    expect(new AppStateStore(file, 0).getSplitRatio('a')).toBe(0.72);
+  });
+
+  it('old preset state loads safely: hidden-pane presets become focus views, ratio presets continue as the ratio, junk is ignored', () => {
+    const file = tmpFile();
+    writeFileSync(
+      file,
+      JSON.stringify({
+        schemaVersion: 1,
+        workspaces: [
+          { ...ws('a'), uiState: { splitRatio: 0.6, layoutMode: 'split-80-20' } },
+          { ...ws('b'), uiState: { splitRatio: 0.37, layoutMode: 'gpt-hidden' } },
+          { ...ws('c'), uiState: { splitRatio: 0.45, layoutMode: 'terminal-hidden' } },
+          { ...ws('d'), uiState: { splitRatio: 0.55, layoutMode: 'custom' } },
+          { ...ws('e'), uiState: { splitRatio: 5, layoutMode: 'bogus' } },
+          { ...ws('f'), uiState: { splitRatio: 0.5, layoutMode: 'split-20-80', viewMode: 'claude-focus' } },
+        ],
+        tasks: [],
+        reviewPackets: [],
+        activeWorkspaceId: null,
+      }),
+    );
+    const s = new AppStateStore(file, 0);
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+    expect(ids.map((id) => s.getViewMode(id))).toEqual(['split', 'claude-focus', 'chatgpt-focus', 'split', 'split', 'claude-focus']);
+    expect(ids.map((id) => s.getSplitRatio(id))).toEqual([0.8, 0.37, 0.45, 0.55, DEFAULT_SPLIT_RATIO, 0.2]);
+  });
+
+  it('rollback safety: dragging replaces a legacy preset (record becomes custom), and nothing is deleted', () => {
+    const file = tmpFile();
+    const s = new AppStateStore(file, 0);
+    s.addWorkspace({ ...ws('a'), uiState: { splitRatio: 0.6, layoutMode: 'split-20-80' } });
+    s.setSplitRatio('a', 0.7);
+    s.setViewMode('a', 'chatgpt-focus');
+    // An older version reads layoutMode + splitRatio and shows the same ratio; viewMode is an extra field it ignores.
+    expect(s.workspace('a')!.uiState).toEqual({ splitRatio: 0.7, layoutMode: 'custom', viewMode: 'chatgpt-focus' });
+    expect(new AppStateStore(file, 0).getSplitRatio('a')).toBe(0.7);
+    // Records that never had a preset do not gain one.
+    s.addWorkspace(ws('b'));
+    s.setSplitRatio('b', 0.4);
+    expect(s.workspace('b')!.uiState).toEqual({ splitRatio: 0.4 });
   });
 
   it('marks running tasks interrupted after a restart and keeps review packets', () => {
@@ -106,17 +155,6 @@ describe('AppStateStore', () => {
     expect(s.get().workspaces).toEqual([]);
     expect(readdirSync(join(file, '..')).some((f) => f.includes('corrupt'))).toBe(true);
   });
-  it('auto-send preference defaults on, persists, and older files without preferences read as on', () => {
-    const file = tmpFile();
-    const s = new AppStateStore(file, 0);
-    expect(s.preferences().autoSendOnRequest).toBe(true);
-    s.setPreferences({ autoSendOnRequest: false });
-    expect(new AppStateStore(file, 0).preferences().autoSendOnRequest).toBe(false);
-    const old = tmpFile();
-    writeFileSync(old, JSON.stringify({ schemaVersion: 1, workspaces: [], tasks: [], reviewPackets: [], activeWorkspaceId: null }));
-    expect(new AppStateStore(old, 0).preferences().autoSendOnRequest).toBe(true);
-  });
-
   it('a failed save is logged and retried later instead of throwing', () => {
     vi.useFakeTimers();
     try {

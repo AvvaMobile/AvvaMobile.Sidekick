@@ -3,7 +3,7 @@ import type { ClaudeRunRequest } from '../ClaudeRunner';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sanitizeTerminalPrompt } from '../../../domain/handoff/promptText';
+import { sanitizeTerminalPrompt } from '../../../domain/prompt/promptText';
 import { InteractiveClaudeRunner, isSamePrompt } from '../InteractiveClaudeRunner';
 import { StopHookChannel, lastAssistantText, parseHookPayload, parseStopPayload, type PromptSubmitEvent, type StopEvent } from '../StopHookChannel';
 
@@ -192,6 +192,11 @@ describe('isSamePrompt', () => {
     expect(isSamePrompt('a  b\n c', 'a b c')).toBe(true);
     expect(isSamePrompt('x'.repeat(300), 'x'.repeat(5000))).toBe(true);
     expect(isSamePrompt('[Pasted text #1 +40 lines]', 'long prompt')).toBe(true);
+    // Claude Code 2.1.x reports a multi-line paste wrapped in <pasted_content> (real hook payload).
+    const ours = 'Reply with the single word OK.\n\n1. Cevabında maddeler halinde yazacağın konular olursa';
+    const wrapped = `\n\n<pasted_content id="2f71">\n${ours}\n</pasted_content id="2f71">\n`;
+    expect(isSamePrompt(wrapped, ours)).toBe(true);
+    expect(isSamePrompt(wrapped, 'A different prompt entirely, not this one')).toBe(false);
     expect(isSamePrompt('ls', 'Implement the login screen')).toBe(false);
   });
 });
@@ -245,5 +250,31 @@ describe('Stop hook payload', () => {
       { type: 'assistant', message: { content: [{ type: 'text', text: 'final' }] } },
     ].map((l) => JSON.stringify(l)).join('\n');
     expect(lastAssistantText(jsonl)).toBe('final');
+  });
+});
+
+describe('InteractiveClaudeRunner task markers', () => {
+  const marker = { taskId: 't', nonce: 'n1' };
+  const wrap = (m: { taskId: string; nonce: string }, body: string) => `blah\n<<<SIDEKICK_START:${m.taskId}:${m.nonce}>>>\n${body}\n<<<SIDEKICK_END:${m.taskId}:${m.nonce}>>>`;
+  const run = (msg: string, stopSession = 's1') => {
+    const t = setup();
+    t.runner.start({ ...t.req, marker });
+    t.submitted('do it');
+    t.stop({ sessionId: stopSession, transcriptPath: null, lastAssistantMessage: msg });
+    return t;
+  };
+  it('hands back only the marked content', () => {
+    const t = run(wrap(marker, 'answer'));
+    expect(t.events).toContainEqual(expect.objectContaining({ type: 'result', isError: false, result: 'answer' }));
+  });
+  it('rejects wrong nonce, missing END, no markers, other task id', () => {
+    for (const msg of [wrap({ taskId: 't', nonce: 'bad' }, 'x'), wrap({ taskId: 'other', nonce: 'n1' }, 'x'), '<<<SIDEKICK_START:t:n1>>>\nx', 'plain']) {
+      const t = run(msg);
+      expect(t.events).toContainEqual(expect.objectContaining({ type: 'result', isError: true, subtype: 'marker_missing' }));
+    }
+  });
+  it('rejects a Stop from another Claude session', () => {
+    const t = run(wrap(marker, 'answer'), 'other-session');
+    expect(t.events).toContainEqual(expect.objectContaining({ type: 'result', isError: true, subtype: 'marker_missing' }));
   });
 });

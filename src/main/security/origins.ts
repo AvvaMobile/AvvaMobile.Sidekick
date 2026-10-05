@@ -93,6 +93,13 @@ export function conversationUrlToStore(raw: string): string {
   return `${url.origin}${url.pathname}`;
 }
 
+/** Both are ChatGPT conversation URLs naming the same conversation (origin + path; query and fragment ignored). */
+export function sameConversationUrl(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b || !isChatGptConversationUrl(a) || !isChatGptConversationUrl(b)) return false;
+  const strip = (u: string) => conversationUrlToStore(u).replace(/\/$/, '');
+  return strip(a) === strip(b);
+}
+
 /** Only plain web links may be handed to the OS browser. */
 export function isSafeExternalUrl(raw: string): boolean {
   let url: URL;

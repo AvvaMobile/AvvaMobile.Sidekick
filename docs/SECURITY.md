@@ -37,6 +37,7 @@ For ChatGPT WebContentsView:
 - no generic preload API
 - no remote module
 - no direct IPC exposure
+- the only page code Sidekick adds runs in an isolated world (adapter scripts and the per-block Send to Claude buttons, D046); results come back as small typed values via `executeJavaScriptInIsolatedWorld`, never through a bridge
 - navigation allowlist
 - window-open allowlist
 - permission request handler
@@ -105,7 +106,7 @@ Claude runs as the user's own interactive Claude Code in the Workspace terminal 
 - with the user's own Claude settings and permission rules; Sidekick's `--settings` file only adds its hooks
 - never with `--dangerously-skip-permissions` or any other permission-skipping flag
 
-A prompt is pasted into Claude only when the user clicks Send to Claude (or ⌘⇧↵), or when the user's own latest ChatGPT message explicitly asks for it (D034, cancellable countdown). ChatGPT output alone never starts a task. The prompt is cleaned of control and escape characters before it is pasted.
+A prompt is pasted into Claude only when the user clicks the Send to Claude button of a ChatGPT block, and only that block's text is sent (D046; only trusted clicks count). ChatGPT output alone never starts a task. The prompt is cleaned of control and escape characters before it is pasted.
 
 Any future change to Claude permission automation requires a documented security decision.
 
@@ -215,7 +216,7 @@ A release is blocked if any of the following is true:
 - microphone permission is globally granted
 - Claude is started with an arbitrary shell command from renderer input, or with permission-skipping flags
 - cross-workspace Claude session ids can mix
-- automatic handoff can occur without explicit user delegation
+- a prompt can reach Claude without a user click on a block's button
 - credentials appear in normal application logs
 - a delegated prompt can reach Claude without control-character sanitizing
 

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { sanitizeTerminalPrompt } from '../../domain/handoff/promptText';
+import { extractMarked } from '../../domain/handback/markers';
+import { sanitizeTerminalPrompt } from '../../domain/prompt/promptText';
 import type { ClaudeRunHandle, ClaudeRunRequest, ClaudeRunnerPort } from './ClaudeRunner';
 import { lastAssistantText, type PromptSubmitEvent, type StopEvent } from './StopHookChannel';
 
@@ -74,16 +75,33 @@ export class InteractiveClaudeRunner implements ClaudeRunnerPort {
 
     const prompt = sanitizeTerminalPrompt(req.prompt);
     let submitted = false;
+    let submittedSession: string | null = null;
     cleanups.push(
       this.stops.onPromptSubmit(req.workspaceId, (e) => {
-        if (!done && !submitted && isSamePrompt(e.prompt, prompt)) submitted = true;
+        if (done || submitted || !isSamePrompt(e.prompt, prompt)) return;
+        submitted = true;
+        submittedSession = e.sessionId;
+        req.onEvent({ type: 'submitted' });
       }),
       this.stops.onInterrupt(req.workspaceId, () => finish(null, null, true)),
       this.stops.onStop(req.workspaceId, (e) => {
         if (done || !submitted) return;
-        const text = e.lastAssistantMessage ?? (e.transcriptPath ? lastAssistantText(this.readTranscript(e.transcriptPath) ?? '') : null);
+        const raw = e.lastAssistantMessage ?? (e.transcriptPath ? lastAssistantText(this.readTranscript(e.transcriptPath) ?? '') : null);
         if (e.sessionId) req.onEvent({ type: 'init', sessionId: e.sessionId });
-        req.onEvent({ type: 'result', isError: false, subtype: 'success', result: text, sessionId: e.sessionId });
+        if (!req.marker) {
+          req.onEvent({ type: 'result', isError: false, subtype: 'success', result: raw, sessionId: e.sessionId });
+          return finish(0, null);
+        }
+        // Managed task: same Claude session as the one that received our prompt, and this task's own START+END markers.
+        const sameSession = !submittedSession || !e.sessionId || submittedSession === e.sessionId;
+        let text = sameSession ? extractMarked(raw, req.marker) : null;
+        if (sameSession && text === null && e.transcriptPath) text = extractMarked(lastAssistantText(this.readTranscript(e.transcriptPath) ?? ''), req.marker);
+        if (text === null) {
+          const why = sameSession ? "Claude's final answer is missing this task's START/END markers" : 'The finished turn belongs to a different Claude session';
+          req.onEvent({ type: 'result', isError: true, subtype: 'marker_missing', result: why, sessionId: e.sessionId });
+        } else {
+          req.onEvent({ type: 'result', isError: false, subtype: 'success', result: text, sessionId: e.sessionId });
+        }
         finish(0, null);
       }),
       this.terminal.onExit(req.workspaceId, () => finish(null, 'Claude exited in the terminal before finishing the task.')),
@@ -120,14 +138,18 @@ export class InteractiveClaudeRunner implements ClaudeRunnerPort {
 const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 /**
- * Whether a UserPromptSubmit payload is the prompt we pasted. Whitespace is normalized and a prefix
- * is compared (Claude may shorten long prompts); a missing prompt or a collapsed paste placeholder
- * counts as ours (the event still arrived after our submit).
+ * Whether a UserPromptSubmit payload is the prompt we pasted. Whitespace is normalized. Claude Code wraps a
+ * multi-line paste in `<pasted_content id="…">…</pasted_content id="…">` (and may shorten long prompts), so the
+ * reported text matches when it starts with ours or contains our opening text after such a wrapper. A missing
+ * prompt or a collapsed paste placeholder counts as ours (the event still arrived after our submit).
  */
 export function isSamePrompt(reported: string | null, ours: string): boolean {
   const a = normalize(reported ?? '');
   if (!a || a.includes('[Pasted text')) return true;
   const b = normalize(ours);
   const n = Math.min(a.length, b.length, 200);
-  return a.length >= Math.min(b.length, 20) && a.slice(0, n) === b.slice(0, n);
+  if (a.length >= Math.min(b.length, 20) && a.slice(0, n) === b.slice(0, n)) return true;
+  const unwrapped = a.replace(/^<pasted_content\b[^>]*>\s*/, '');
+  const m = Math.min(unwrapped.length, b.length, 200);
+  return unwrapped.length >= Math.min(b.length, 20) && unwrapped.slice(0, m) === b.slice(0, m);
 }

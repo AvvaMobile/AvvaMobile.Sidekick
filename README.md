@@ -2,11 +2,11 @@
 
 Plan with ChatGPT. Build with Claude Code. Stop copy-pasting between them.
 
-![Avva Mobile Sidekick: a ChatGPT conversation on the left has written a prompt for Claude Code; the Claude Code terminal is on the right, with the Send to Claude button lit on the divider](docs/images/sidekick.png)
+![Avva Mobile Sidekick: a ChatGPT conversation on the left has written a prompt for Claude Code; the Claude Code terminal is on the right, with a Send to Claude button next to the prompt's Copy button](docs/images/sidekick.png)
 
-Sidekick is a desktop app for macOS and Windows that puts a ChatGPT conversation and a Claude Code terminal side by side, one pair per project. You think out loud with ChatGPT (by voice or text). When the plan is ready, ChatGPT writes a prompt for Claude, and one click hands it to Claude Code in your project folder. When Claude finishes, one more click sends a summary of what changed back to ChatGPT for review.
+Sidekick is a desktop app for macOS and Windows that puts a ChatGPT conversation and a Claude Code terminal side by side, one pair per project. You think out loud with ChatGPT (by voice or text). When ChatGPT writes a prompt or code block for Claude, the **Send to Claude** button next to that block's Copy button hands exactly that block to Claude Code in your project folder. When Claude finishes, one more click sends a summary of what changed back to ChatGPT for review.
 
-You decide every handoff. Nothing moves between ChatGPT and Claude unless you ask for it.
+You decide every handoff. Nothing moves between ChatGPT and Claude unless you click a block's button.
 
 ## How it works
 
@@ -16,16 +16,16 @@ You decide every handoff. Nothing moves between ChatGPT and Claude unless you as
  │ 2. ChatGPT writes a prompt for Claude.│──▶│ 3. Send to Claude: the prompt is    │
  │                                       │   │    pasted into Claude Code, which   │
  │                                       │   │    works in your project folder.    │
- │ 5. ChatGPT reviews the result and you │◀──│ 4. Send to ChatGPT: Claude's result │
- │    decide what happens next.          │   │    and a Git summary go back.       │
+ │ 5. ChatGPT reviews the result and you │◀──│ 4. Claude's result and a Git summary│
+ │    decide what happens next.          │   │    return automatically.            │
  └───────────────────────────────────────┘   └─────────────────────────────────────┘
 ```
 
 - **Projects as tabs.** Each project has its own ChatGPT conversation, its own Claude Code session and its own folder. Switching tabs never mixes their context.
-- **One-click handoffs.** Two round buttons on the divider: *Send to Claude* lights up when ChatGPT has written a Claude prompt; *Send to ChatGPT* appears when Claude has finished.
+- **One button per block.** Every prompt/code block in a ChatGPT reply has its own *Send to Claude* button; it sends exactly that block. It shows *Sent to Claude ✓* only after Claude confirms it received the prompt, otherwise *Send failed — Retry*. When Claude finishes, its result returns to the same ChatGPT conversation automatically. Three views per project: ChatGPT Focus, Split, Claude Focus.
 - **Your Claude Code, unchanged.** The right-hand pane is the real interactive `claude` terminal with your own settings, model, permissions and status line. You can type into it as usual.
 - **Notifications.** A badge, toast and system notification tell you when Claude finishes in a project you are not looking at.
-- **Voice-friendly.** ChatGPT's voice mode works inside the app. Saying "send this to Claude" in your own message lets Sidekick send the next prompt after a 3-second countdown you can cancel (can be turned off in Settings).
+- **Voice-friendly.** ChatGPT's voice mode works inside the app.
 
 ## Install
 
@@ -62,21 +62,20 @@ You can reopen this window any time from **Help → Setup Checklist…**.
 ### Claude only runs when you say so
 
 - Text written by ChatGPT is treated as data. It never starts Claude by itself.
-- Claude receives a prompt only when you click **Send to Claude**, or when your own ChatGPT message explicitly asks for it ("send this to Claude"). That automatic send waits 3 seconds with a **Cancel** button, never fires twice for the same message, and can be turned off.
+- Claude receives a prompt only when you click the **Send to Claude** button of a block, and only that block's text.
 - The prompt is cleaned of control characters before it is pasted, so text in a ChatGPT reply cannot type extra keys into Claude.
-- A prompt that has already run successfully cannot be sent again by another click.
 - Claude Code runs as your normal interactive session with **your own permission settings**. Sidekick never passes flags that skip Claude's permission prompts. Quitting while Claude is working asks for confirmation first.
 
 ### What is sent back to ChatGPT, and when
 
-Only when you click **Send to ChatGPT**, Sidekick posts a bounded review message into that project's ChatGPT conversation. It contains:
+When a Claude task that Sidekick started finishes successfully, Sidekick posts a bounded review message into that project's ChatGPT conversation. It contains:
 
 - an excerpt of the prompt and Claude's final answer,
 - the Git branch, changed file names, diff statistics and a size-limited diff excerpt.
 
 Files that look like secrets are left out of the diff: `.env` files, keys and certificates (`*.pem`, `*.key`, `*.p12`, `*.pfx`, SSH keys), anything named `*secret*` or `*credential*`, and lock files. The full Claude transcript is never sent.
 
-Keep in mind that the diff excerpt is your source code going to ChatGPT. If a project's code must not leave your machine, do not use *Send to ChatGPT* for it.
+Keep in mind that the diff excerpt is your source code going to ChatGPT. If a project's code must not leave your machine, do not send tasks to Claude through Sidekick for it. Your own typing in the Claude terminal is never sent to ChatGPT.
 
 ### Your accounts and credentials
 
@@ -108,7 +107,7 @@ Please report security issues privately through GitHub: **Security → Report a 
 
 ## Limitations
 
-- ChatGPT's page changes often. If *Send to Claude* stays disabled while a prompt is visible, the prompt detection needs an update.
+- ChatGPT's page changes often. If the *Send to Claude* button is missing next to a block's Copy button, the button injection needs an update.
 - Windows support is new and has had little real-world testing.
 - Windows builds are not yet code-signed (see [Install](#install)).
 

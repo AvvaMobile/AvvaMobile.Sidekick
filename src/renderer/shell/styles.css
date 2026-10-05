@@ -40,13 +40,13 @@ html.platform-win32 .topbar { padding: 0 140px 0 8px; }
 html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .tab, .tab-add, .layout-presets { -webkit-app-region: no-drag; }
 .tabs { flex: 1; min-width: 0; align-self: stretch; display: flex; }
-.tab-list { display: flex; align-items: flex-end; gap: 4px; overflow-x: auto; overflow-y: hidden; padding: 6px 2px 0; scrollbar-width: none; }
+.tab-list { display: flex; align-items: flex-end; gap: 4px; overflow-x: auto; overflow-y: hidden; padding: 6px 2px 1px; margin-bottom: -1px; scrollbar-width: none; }
 .tab-list::-webkit-scrollbar { display: none; }
 .tab { position: relative; flex: 0 0 150px; width: 150px; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: none; border-radius: 9px 9px 0 0; background: transparent; color: var(--chrome-muted); cursor: pointer; font-weight: 500; touch-action: none; user-select: none; transition: background .12s, color .12s; }
 .tab:hover { background: #dcdcdf; color: var(--chrome-text); }
 .tab:not(.active)::after { content: ''; position: absolute; right: -3px; top: 9px; bottom: 9px; width: 1px; background: #c4c4c8; pointer-events: none; }
 .tab:hover::after, .tab:has(+ .tab:hover)::after, .tab:has(+ .tab.active)::after, .tab:last-child::after { opacity: 0; }
-.tab.active { background: var(--chrome-topbar); color: var(--chrome-text); font-weight: 600; box-shadow: 0 1px 0 var(--chrome-topbar), 0 0 0 1px var(--chrome-border), inset 0 2px 0 var(--accent); clip-path: inset(-2px -2px 0 -2px); }
+.tab.active { background: var(--chrome-topbar); color: var(--chrome-text); font-weight: 600; margin-bottom: -1px; box-shadow: 0 0 0 1px var(--chrome-border), 0 -2px 12px rgba(0, 0, 0, .22); clip-path: inset(-16px -16px 0 -16px); }
 .tab-name { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-dot { flex: none; width: 10px; height: 10px; border-radius: 3px; }
 .tab-img { flex: none; width: 16px; height: 16px; object-fit: contain; pointer-events: none; }
@@ -106,8 +106,6 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .effort-select { border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--text); padding: 6px 8px; font-size: 13px; cursor: pointer; }
 .effort-select:disabled { opacity: .45; cursor: default; }
 .menu-wrap { position: relative; }
-.copy-menu { right: auto; left: 0; top: 100%; }
-.copy-seg button:last-child { padding: 0 6px; }
 .menu { position: absolute; right: 0; top: 28px; z-index: 5; background: var(--pane-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px; min-width: 190px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
 .menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 6px 10px; border-radius: 5px; cursor: pointer; }
 .menu button:hover:not(:disabled) { background: #2f343c; }
@@ -116,20 +114,12 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 /* Review */
 .review-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #24476e; background: #131b26; font-size: 12.5px; }
 .review-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.auto-send-why { font-weight: 400; opacity: 0.75; }
 
 /* Terminal */
 .terminal-wrap { flex: 1; min-height: 0; flex-direction: column; background: var(--term); }
 .terminal-host { flex: 1; min-height: 0; position: relative; padding: 6px 0 0 8px; }
 .xterm-host { position: absolute; inset: 6px 0 0 8px; }
 .terminal-banner { display: flex; gap: 10px; align-items: center; padding: 6px 12px; background: #2a2116; color: var(--warn); font-size: 12px; }
-
-/* Diagnostics (developer only) */
-.diagnostics { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: #15171b; }
-.diag-note { font-size: 11px; color: var(--warn); }
-.diag-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.diagnostics textarea { height: 60px; background: var(--term); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: 12px 'SF Mono', Menlo, monospace; }
-.diag-log { flex: 1; overflow: auto; margin: 0; padding: 8px; background: var(--term); border-radius: 6px; font-size: 11px; white-space: pre-wrap; }
 
 /* Welcome / modals / toasts */
 .start-frame { position: absolute; right: 0; bottom: 0; background: var(--pane); overflow-y: auto; }
@@ -158,6 +148,7 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .settings-section { margin-top: 26px; }
 .settings-section h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .settings-section.danger h2 { color: var(--err); }
+.set-textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 8px; background: var(--term); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: 12px/1.5 inherit; }
 .set-row { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 8px 24px; align-items: start; padding: 12px 0; border-top: 1px solid var(--border); }
 .set-label { display: flex; flex-direction: column; gap: 3px; padding-top: 5px; font-weight: 500; }
 .set-label small { color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.4; }
@@ -172,8 +163,6 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .icon-row { display: flex; align-items: center; gap: 8px; }
 .icon-preview { width: 28px; height: 28px; border-radius: 7px; object-fit: contain; }
 .icon-preview.initial { display: grid; place-items: center; color: #fff; font-weight: 700; }
-.switch { display: inline-flex; align-items: center; gap: 8px; padding-top: 5px; cursor: pointer; }
-.switch input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 @media (max-width: 720px) { .set-row { grid-template-columns: minmax(0, 1fr); } }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 20; }
 .modal { width: 440px; max-width: calc(100vw - 32px); background: var(--pane); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
@@ -258,3 +247,15 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .layout-btn { width: 28px; height: 24px; display: grid; place-items: center; border: none; border-radius: 6px; background: transparent; color: var(--chrome-muted); cursor: pointer; }
 .layout-btn:hover { color: var(--chrome-text); background: #e8e8ea; }
 .layout-btn.selected { background: var(--chrome-topbar); color: var(--accent); box-shadow: 0 0 0 1px var(--chrome-border); }
+
+/* ChatGPT Focus: slim Claude status strip under the ChatGPT view. */
+.status-bar { position: absolute; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--pane); border-top: 1px solid var(--border); font-size: 12.5px; overflow: hidden; z-index: 3; }
+.status-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.status-dot.running { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.status-dot.delivered { background: var(--ok); }
+.status-dot.sending { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.status-dot.delivery-failed { background: var(--err); }
+.status-dot.failed { background: var(--err); }
+.status-label { white-space: nowrap; }
+.status-spacer { flex: 1; }
+.review-bar.compact { border: none; background: transparent; padding: 0; }

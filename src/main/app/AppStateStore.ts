@@ -1,7 +1,8 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { renameWithRetry } from './renameWithRetry';
-import { DEFAULT_LAYOUT_MODE, DEFAULT_SPLIT_RATIO, isLayoutMode, isValidSplitRatio, type LayoutMode, type SplitRatio } from '../../domain/layout/splitPane';
+import { DEFAULT_SPLIT_RATIO, isValidSplitRatio, type SplitRatio } from '../../domain/layout/splitPane';
+import { isViewMode, legacyPresetRatio, legacyViewMode, type ViewMode } from '../../domain/layout/viewMode';
 import type { ReviewPacket } from '../../domain/review/reviewPacket';
 import type { TaskRecord } from '../../domain/task/task';
 import { isPermutation } from '../../domain/workspace/order';
@@ -26,15 +27,13 @@ export interface AppState {
 }
 
 export interface Preferences {
-  /** Auto-send a ready Claude Prompt when the user asked ChatGPT to send it (D034). Default on. */
-  autoSendOnRequest: boolean;
   /** The one-time "Buy me a coffee" popup has been shown. */
   coffeePromptShown: boolean;
   /** The one-time requirements popup (D037) has been shown. */
   setupPromptShown: boolean;
 }
 
-const defaultPreferences = (): Preferences => ({ autoSendOnRequest: true, coffeePromptShown: false, setupPromptShown: false });
+const defaultPreferences = (): Preferences => ({ coffeePromptShown: false, setupPromptShown: false });
 
 const empty = (): AppState => ({
   schemaVersion: APP_STATE_SCHEMA_VERSION,
@@ -111,28 +110,39 @@ export class AppStateStore implements SplitRatioStore {
     this.save();
   }
 
+  /**
+   * A record saved while layout presets existed may carry a preset `layoutMode`; its ratio (20/50/80 %) was the
+   * visible split then, so it continues as the saved ratio. Hidden-pane presets just use the stored ratio.
+   */
   getSplitRatio(workspaceId: string): SplitRatio {
-    const r = this.workspace(workspaceId)?.uiState.splitRatio;
+    const ui = this.workspace(workspaceId)?.uiState;
+    const r = legacyPresetRatio(ui?.layoutMode) ?? ui?.splitRatio;
     return isValidSplitRatio(r) ? r : DEFAULT_SPLIT_RATIO;
   }
 
+  /**
+   * A dragged ratio replaces any legacy preset: `layoutMode` becomes `custom` (never removed), so an older
+   * version, which still reads it, shows the same ratio after a rollback.
+   */
   setSplitRatio(workspaceId: string, ratio: SplitRatio): void {
     const w = this.workspace(workspaceId);
-    if (!w || !isValidSplitRatio(ratio) || w.uiState.splitRatio === ratio) return;
-    w.uiState = { ...w.uiState, splitRatio: ratio };
+    if (!w || !isValidSplitRatio(ratio)) return;
+    const hasPreset = w.uiState.layoutMode !== undefined && w.uiState.layoutMode !== 'custom';
+    if (w.uiState.splitRatio === ratio && !hasPreset) return;
+    w.uiState = { ...w.uiState, splitRatio: ratio, ...(w.uiState.layoutMode !== undefined ? { layoutMode: 'custom' } : {}) };
     this.save();
   }
 
-  /** Records written before presets existed have no layoutMode: their saved ratio continues as `custom`. */
-  getLayoutMode(workspaceId: string): LayoutMode {
-    const m = this.workspace(workspaceId)?.uiState.layoutMode;
-    return isLayoutMode(m) ? m : DEFAULT_LAYOUT_MODE;
+  /** Saved view of a Workspace; records without one derive it from the old preset (hidden pane → focus view), else Split. */
+  getViewMode(workspaceId: string): ViewMode {
+    const ui = this.workspace(workspaceId)?.uiState;
+    return isViewMode(ui?.viewMode) ? ui.viewMode : legacyViewMode(ui?.layoutMode);
   }
 
-  setLayoutMode(workspaceId: string, mode: LayoutMode): void {
+  setViewMode(workspaceId: string, mode: ViewMode): void {
     const w = this.workspace(workspaceId);
-    if (!w || !isLayoutMode(mode) || w.uiState.layoutMode === mode) return;
-    w.uiState = { ...w.uiState, layoutMode: mode };
+    if (!w || !isViewMode(mode) || this.getViewMode(workspaceId) === mode) return;
+    w.uiState = { ...w.uiState, viewMode: mode };
     this.save();
   }
 
@@ -227,7 +237,6 @@ export class AppStateStore implements SplitRatioStore {
         reviewPackets: Array.isArray(parsed.reviewPackets) ? parsed.reviewPackets : [],
         activeWorkspaceId: typeof parsed.activeWorkspaceId === 'string' ? parsed.activeWorkspaceId : null,
         preferences: {
-          autoSendOnRequest: parsed.preferences?.autoSendOnRequest !== false,
           coffeePromptShown: parsed.preferences?.coffeePromptShown === true,
           setupPromptShown: parsed.preferences?.setupPromptShown === true,
         },

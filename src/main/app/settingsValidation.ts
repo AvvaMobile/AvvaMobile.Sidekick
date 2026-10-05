@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 import { validateWorkspaceName } from '../../domain/workspace/workspace';
 import { parseGithubRepository } from '../../shared/github';
 import { isModelChoice } from '../../shared/models';
-import type { AppSettingsPatch, ProjectSettingsPatch } from '../../shared/settings';
+import type { ProjectSettingsPatch } from '../../shared/settings';
 import { conversationUrlToStore, isChatGptConversationUrl } from '../security/origins';
 
 export type Validated<T> = { ok: true; patch: T } | { ok: false; detail: string };
@@ -10,7 +10,6 @@ export type Validated<T> = { ok: true; patch: T } | { ok: false; detail: string 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const PROJECT_KEYS = ['name', 'projectPath', 'color', 'model', 'chatConversationUrl', 'icon', 'githubRepository'] as const;
-const APP_KEYS = ['autoSendOnRequest', 'developerMode'] as const;
 
 /**
  * Strict validation of a `workspace:update-settings` patch from the renderer. Pure except for `isDirectory`
@@ -60,22 +59,6 @@ export function validateProjectSettingsPatch(raw: unknown, isDirectory: (path: s
       if (!repo) return { ok: false, detail: 'Enter a GitHub repository as owner/repo.' };
       patch.githubRepository = repo;
     }
-  }
-  return { ok: true, patch };
-}
-
-/** Strict validation of an `app:update-settings` patch. */
-export function validateAppSettingsPatch(raw: unknown): Validated<AppSettingsPatch> {
-  if (!isRecord(raw)) return { ok: false, detail: 'Invalid settings.' };
-  const keys = Object.keys(raw);
-  if (keys.length === 0) return { ok: false, detail: 'Nothing to change.' };
-  const unknown = keys.find((k) => !(APP_KEYS as readonly string[]).includes(k));
-  if (unknown) return { ok: false, detail: `Unknown setting: ${unknown.slice(0, 40)}` };
-  const patch: AppSettingsPatch = {};
-  for (const k of APP_KEYS) {
-    if (!(k in raw)) continue;
-    if (typeof raw[k] !== 'boolean') return { ok: false, detail: `${k} must be true or false.` };
-    patch[k] = raw[k];
   }
   return { ok: true, patch };
 }

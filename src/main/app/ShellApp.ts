@@ -1,7 +1,6 @@
 import {
   app,
   BrowserWindow,
-  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -22,19 +21,19 @@ import { basename, isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as nodePty from 'node-pty';
 import { autoUpdater } from 'electron-updater';
-import { DEFAULT_SPLIT_RATIO, isLayoutMode, isValidSplitRatio, type SplitGeometry } from '../../domain/layout/splitPane';
+import { DEFAULT_SPLIT_RATIO, isValidSplitRatio } from '../../domain/layout/splitPane';
+import { isViewMode } from '../../domain/layout/viewMode';
 import { isEffortChoice, isModelChoice, parseDefaultModel, type ModelChoice } from '../../shared/models';
 import { colorForName, initialFor, isOpen, validateWorkspaceName, type WorkspaceRecord } from '../../domain/workspace/workspace';
 import type { AppSettings, ProjectSettings, SettingsTarget } from '../../shared/settings';
 import { isSetupLink, SETUP_LINKS, type SetupCheck } from '../../shared/setup';
-import { relayBounds, TOPBAR_HEIGHT, workAreaFor } from '../../shared/shellLayout';
-import { BUY_ME_A_COFFEE_URL, SHELL_CHANNELS, type ProjectEntry, type RelayButtonState, type RelayState, type ShellCommand, type ShellState, type ToastMessage } from '../../shared/state';
-import { ChatGPTAdapter, MAX_PROMPT_CHARS } from '../chatgpt/ChatGPTAdapter';
+import { TOPBAR_HEIGHT, workAreaFor } from '../../shared/shellLayout';
+import { BUY_ME_A_COFFEE_URL, SHELL_CHANNELS, type ProjectEntry, type ShellCommand, type ShellState, type ToastMessage } from '../../shared/state';
+import { ChatGPTAdapter } from '../chatgpt/ChatGPTAdapter';
 import { InteractiveClaudeRunner } from '../claude/InteractiveClaudeRunner';
 import { isClaudeSessionId, launchCommand, loginShellEnv, resolveClaudeExecutable } from '../claude/ClaudeRunner';
 import { StopHookChannel, hookSettings } from '../claude/StopHookChannel';
 import { DeferredRelaunch } from './DeferredRelaunch';
-import { ResponseCopier } from './ResponseCopier';
 import { DevelopmentPaneRegistry } from '../development/DevelopmentPane';
 import { createDiagnosticsLog } from '../diagnostics/diagnosticsLog';
 import { GitEvidence } from '../git/GitEvidence';
@@ -43,7 +42,7 @@ import { createChatGptView, redactUrl, redactUrlsIn } from '../security/remoteCo
 import { PtyService } from '../terminal/PtyService';
 import { SplitLayoutController } from '../workspace/SplitLayoutController';
 import { AppStateStore } from './AppStateStore';
-import { validateAppSettingsPatch, validateProjectSettingsPatch } from './settingsValidation';
+import { validateProjectSettingsPatch } from './settingsValidation';
 import { isSamePage, mergeWindowOrder, nextActiveTab, stateForWindow } from './shellWindows';
 import { prefillGithubRepository } from '../github/gitRemote';
 import { defaultGithubToken, setGithubRepository, verifyWorkspaceGithub } from '../github/GithubAccessChecker';
@@ -57,22 +56,20 @@ interface ChatRuntime {
   adapter: ChatGPTAdapter;
 }
 
-/** One shell window: its own tab selection (split layout) and relay overlay. */
+/** One shell window: its own tab selection (split layout). */
 interface ShellWindow {
   win: BrowserWindow;
   layout: SplitLayoutController;
-  relay: WebContentsView;
-  relayState: RelayState | null;
 }
 
-const POLL_MS = 1000;
-const INACTIVE_EVERY = 5;
-const LOGIN_CHECK_EVERY = 5;
+/** Cadence of the ChatGPT login check. */
+const LOGIN_POLL_MS = 5000;
+/** Cadence of the light read of clicks on the per-block "Send to Claude" buttons. */
+const BLOCK_SEND_POLL_MS = 250;
 
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 
-const isCopyBlock = (v: unknown): v is { block: number } => typeof v === 'object' && v !== null && typeof (v as { block?: unknown }).block === 'number';
 const isId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(v);
 
 /**
@@ -85,13 +82,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   const store = new AppStateStore(join(userData, 'workspace-state.json'));
   const panes = new DevelopmentPaneRegistry();
   const stopHooks = new StopHookChannel(join(userData, 'hook-events'));
-  const responses = new ResponseCopier(clipboard, (p) => {
-    try {
-      return readFileSync(p, 'utf8');
-    } catch {
-      return null;
-    }
-  });
   const icons = new WorkspaceIcons(join(userData, 'icons'));
   const chats = new Map<string, ChatRuntime>();
   let defaultModel: ModelChoice | null = null;
@@ -100,12 +90,10 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   } catch {
     // no user settings: Claude Code's built-in default applies
   }
-  // Developer → Diagnostics; SIDEKICK_DEVELOPER=1 (or WORKSPACE_DEVELOPER=1) starts with it enabled (development only).
-  let debugMode = process.env.SIDEKICK_DEVELOPER === '1' || process.env.WORKSPACE_DEVELOPER === '1';
 
   // ---------- Windows ----------
   // Every open tab lives in exactly one shell window; the first window is the main window. Each window has
-  // its own split layout (active tab) and relay overlay; runtimes (ChatGPT view, PTY, orchestrator) are shared.
+  // its own split layout (active tab); runtimes (ChatGPT view, PTY, orchestrator) are shared.
 
   const windows = new Map<number, ShellWindow>();
   const windowOf = new Map<string, ShellWindow>();
@@ -121,8 +109,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     // loadURL/loadFile are main-initiated and never pass through the will-navigate guard.
     if (process.env.ELECTRON_RENDERER_URL) await sw.win.loadURL(shellPageUrl);
     else await sw.win.loadFile(join(__dirname, '../renderer/shell/index.html'));
-    if (process.env.ELECTRON_RENDERER_URL) void sw.relay.webContents.loadURL(`${process.env.ELECTRON_RENDERER_URL}/relay/index.html`);
-    else void sw.relay.webContents.loadFile(join(__dirname, '../renderer/relay/index.html'));
   };
 
   function createShellWindow(bounds?: Rectangle): ShellWindow {
@@ -161,40 +147,15 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     win.webContents.on('will-navigate', (e) => e.preventDefault());
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-    // The round relay buttons on the divider live in their own transparent local view so they can
-    // straddle the ChatGPT view's edge (DOM in the shell renderer is always drawn below that view).
-    const relay = new WebContentsView({
-      webPreferences: {
-        preload: join(__dirname, '../preload/relay.js'),
-        contextIsolation: true,
-        sandbox: true,
-        nodeIntegration: false,
-        webSecurity: true,
-        spellcheck: false,
-      },
-    });
-    relay.setBackgroundColor('#00000000');
-    relay.setVisible(false);
-    relay.webContents.on('will-navigate', (e) => e.preventDefault());
-    relay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    win.contentView.addChildView(relay);
-
     const layout = new SplitLayoutController(
       store,
       () => {
         const [w, h] = win.getContentSize();
         return workAreaFor(w!, h!);
       },
-      (geometry: SplitGeometry | null) => {
-        if (geometry) relay.setBounds(relayBounds(geometry.splitter));
-        relay.setVisible(geometry !== null);
-      },
     );
-    const sw: ShellWindow = { win, layout, relay, relayState: null };
+    const sw: ShellWindow = { win, layout };
     windows.set(win.id, sw);
-    relay.webContents.on('did-finish-load', () => {
-      if (sw.relayState) relay.webContents.send('relay:state', sw.relayState);
-    });
 
     // In full screen the traffic lights disappear, so the strip needs no room for them.
     win.on('enter-full-screen', () => sendCommand(sw, 'fullscreen-enter'));
@@ -226,7 +187,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       // The main window stays registered (destroyed) so "the main window" is always defined until exit.
       if (sw !== mainWindow()) windows.delete(winId);
       for (const [id, owner] of windowOf) if (owner === sw) windowOf.delete(id);
-      if (!relay.webContents.isDestroyed()) relay.webContents.close();
       broadcast();
     });
     return sw;
@@ -255,8 +215,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       if (!from.win.isDestroyed()) from.win.contentView.removeChildView(c.view);
     }
     sw.win.contentView.addChildView(c.view);
-    // Re-adding moves the relay overlay back above the ChatGPT view.
-    sw.win.contentView.addChildView(sw.relay);
     sw.layout.register(id, c.view);
     windowOf.set(id, sw);
   }
@@ -328,6 +286,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       return !!sw && sw.layout.activeWorkspaceId === id && !sw.win.isDestroyed() && sw.win.isFocused() && !sw.win.isMinimized();
     },
     notifyTaskFinished: (n) => notifyFinished(n),
+    blockSendStatus: (id, st) => void chats.get(id)?.adapter.setBlockSendStatus(st.id, st.state, st.detail),
     notifyFlow: (n) => notifyFinished({ ...n, taskId: '', background: true }),
     onChange: broadcast,
     iconFor: (id) => icons.dataUrl(id, store.workspace(id)?.iconFile),
@@ -350,7 +309,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     const projects: ProjectEntry[] = [...store.get().workspaces]
       .sort((a, b) => (b.lastOpenedAt ?? '').localeCompare(a.lastOpenedAt ?? '') || a.name.localeCompare(b.name))
       .map((w) => ({ id: w.id, name: w.name, projectPath: w.projectPath, open: isOpen(w) }));
-    return { workspaces, projects, activeWorkspaceId: mainWindow().layout.activeWorkspaceId, debugMode };
+    return { workspaces, projects, activeWorkspaceId: mainWindow().layout.activeWorkspaceId };
   }
 
   /** What one window's renderer sees: its own tabs and active tab; the Projects list is shared. */
@@ -389,8 +348,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     orchestrator.register(w.id);
     // The user's own Claude turns (typed in the terminal) also end the flow's Claude side.
     stopHooks.onStop(w.id, (e) => {
-      responses.record(w.id, e);
-      orchestrator.observeClaudeStop(w.id);
       relaunches.settled(w.id);
     });
     const view = createChatGptView(
@@ -410,11 +367,18 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       const stored = conversationUrlToStore(url);
       if (store.workspace(w.id)!.chatConversationUrl !== stored) store.updateWorkspace(w.id, { chatConversationUrl: stored });
     };
+    // Injecting the per-block buttons is idempotent; the click poll also reinstalls them after a reload.
+    const guard = () => void adapter.installBlockSendButtons();
+    view.webContents.on('did-finish-load', guard);
     view.webContents.on('did-navigate', (_e, url) => {
       trackUrl(url);
+      guard();
       void view.webContents.session.cookies.flushStore();
     });
-    view.webContents.on('did-navigate-in-page', (_e, url) => trackUrl(url));
+    view.webContents.on('did-navigate-in-page', (_e, url) => {
+      trackUrl(url);
+      guard();
+    });
     view.webContents.on('render-process-gone', (_e, d) => diag(`[${w.id.slice(0, 8)}] render-process-gone ${d.reason}`));
     // ChatGPT's beforeunload handler would otherwise veto closing the window / quitting the app.
     view.webContents.on('will-prevent-unload', (e) => e.preventDefault());
@@ -434,7 +398,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     orchestrator.unregister(id);
     pty.stop(id);
     stopHooks.close(id);
-    responses.forget(id);
     relaunches.forget(id);
     if (c) {
       if (sw && !sw.win.isDestroyed()) sw.win.contentView.removeChildView(c.view);
@@ -487,30 +450,43 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     moveTab(id, sw);
   }
 
-  // ---------- Candidate observation (passive; never launches anything) ----------
+  // ---------- ChatGPT login state ----------
 
-  let tick = 0;
-  const inFlight = new Set<string>();
-  const poll = setInterval(() => {
-    tick++;
+  const loginInFlight = new Set<string>();
+  const loginPoll = setInterval(() => {
     for (const [id, c] of chats) {
-      const active = id === windowOf.get(id)?.layout.activeWorkspaceId;
-      if (!active && tick % INACTIVE_EVERY !== 0) continue;
-      if (inFlight.has(id) || c.view.webContents.isLoading()) continue;
-      inFlight.add(id);
+      if (loginInFlight.has(id) || c.view.webContents.isLoading()) continue;
+      loginInFlight.add(id);
       void (async () => {
         try {
-          orchestrator.observeCandidate(id, await c.adapter.getLatestClaudePromptBlock());
-          if (tick % LOGIN_CHECK_EVERY === 0) {
-            const s = await c.adapter.getPageState();
-            orchestrator.setChatLoggedIn(id, s.ok ? s.value.composerFound && !s.value.loggedOutMarkers : null);
-          }
+          const s = await c.adapter.getPageState();
+          orchestrator.setChatLoggedIn(id, s.ok ? s.value.composerFound && !s.value.loggedOutMarkers : null);
         } finally {
-          inFlight.delete(id);
+          loginInFlight.delete(id);
         }
       })();
     }
-  }, POLL_MS);
+  }, LOGIN_POLL_MS);
+
+  // Clicks on a block's own "Send to Claude" button: each carries exactly that block's text.
+  const blockSendInFlight = new Set<string>();
+  const blockSendPoll = setInterval(() => {
+    for (const [id, c] of chats) {
+      if (blockSendInFlight.has(id) || c.view.webContents.isLoading()) continue;
+      blockSendInFlight.add(id);
+      void (async () => {
+        try {
+          const res = await c.adapter.takeBlockSends();
+          if (!res.ok) return;
+          // A reloaded page lost the buttons (they live in the page's isolated world): put them back.
+          if (!res.value.installed) await c.adapter.installBlockSendButtons();
+          for (const req of res.value.requests) void orchestrator.sendBlockToClaude(id, req);
+        } finally {
+          blockSendInFlight.delete(id);
+        }
+      })();
+    }
+  }, BLOCK_SEND_POLL_MS);
 
   // ---------- IPC (trusted shell renderer only) ----------
 
@@ -540,20 +516,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   handleIn('shell:get-state', (sw) => windowState(sw));
   handle('shell:terminal-snapshot', (id) => (known(id) ? panes.snapshot(id) : ''));
   handleIn('shell:set-overlay', (sw, hidden) => sw.layout.setSuppressed(hidden === true));
-  const relayButton = (v: unknown): RelayButtonState => {
-    const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
-    return { enabled: o.enabled === true, title: typeof o.title === 'string' ? o.title.slice(0, 200) : '' };
-  };
-  onIn('relay:set-state', (sw, s) => {
-    const o = (s && typeof s === 'object' ? s : {}) as Record<string, unknown>;
-    sw.relayState = { claude: relayButton(o.claude), chatgpt: relayButton(o.chatgpt) };
-    sw.relay.webContents.send('relay:state', sw.relayState);
-  });
-  // Clicks only from a window's relay overlay; that window's shell renderer performs the action for its active Workspace.
-  ipcMain.on('relay:click', (e, button) => {
-    const sw = [...windows.values()].find((w) => e.sender === w.relay.webContents);
-    if (sw) sendCommand(sw, button === 'chatgpt' ? 'send-review' : 'send-to-claude');
-  });
 
   handle('workspace:select', (id) => {
     if (known(id)) selectWorkspace(id);
@@ -867,17 +829,9 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       },
     ]).popup({ window: sw.win });
   });
-  handle('handoff:send', async (id) => (known(id) ? orchestrator.sendToClaude(id, 'button') : { ok: false, code: 'unknown_workspace', detail: '' }));
-  handle('handoff:cancel-auto', (id) => (known(id) ? orchestrator.cancelAutoSendRequest(id) : { ok: false }));
   handle('task:cancel', (id) => (known(id) ? orchestrator.cancelTask(id) : { ok: false }));
   handle('session:reset', (id) => (known(id) ? orchestrator.resetSession(id) : { ok: false }));
-  // Copy of Claude's last response: clipboard only, never touches the PTY, the session or a running task.
-  handle('response:info', (id) => (known(id) ? responses.info(id) : { available: false, blocks: [] }));
-  handle('response:copy', (id, target) => {
-    const t = target === 'auto' || target === 'full' ? target : isCopyBlock(target) ? { block: target.block } : null;
-    return known(id) && t ? responses.copy(id, t) : { ok: false, code: 'invalid', detail: '' };
-  });
-  handle('review:send', (id, taskId) => (known(id) && isId(taskId) ? orchestrator.sendReview(id, taskId) : { ok: false, code: 'invalid', detail: '' }));
+  handle('review:retry', (id, taskId) => (known(id) && isId(taskId) ? orchestrator.retryReview(id, taskId) : { ok: false, code: 'invalid', detail: '' }));
   handle('terminal:restart', (id) => {
     if (known(id)) pty.restart(id);
   });
@@ -905,61 +859,22 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     } else sw.layout.preview(ratio);
   });
 
-  // Preset buttons: always act on the sending window's active Workspace; persisted per Workspace.
-  onIn('layout:set-mode', (sw, arg) => {
+  // View buttons (ChatGPT Focus / Split / Claude Focus): act on the sending window's active Workspace; persisted per Workspace.
+  onIn('layout:set-view', (sw, arg) => {
     const { workspaceId, mode } = (arg ?? {}) as { workspaceId?: unknown; mode?: unknown };
-    if (!known(workspaceId) || workspaceId !== sw.layout.activeWorkspaceId || !isLayoutMode(mode)) return;
-    sw.layout.setMode(mode);
+    if (!known(workspaceId) || workspaceId !== sw.layout.activeWorkspaceId || !isViewMode(mode)) return;
+    sw.layout.setViewMode(mode);
     broadcast();
   });
-
-  // Developer-only adapter diagnostics (D025): refused unless Developer → Diagnostics is enabled.
-  const diagHandle = (channel: string, fn: (c: ChatRuntime, arg: unknown) => unknown) =>
-    handleIn(channel, (sw, arg) => {
-      const id = sw.layout.activeWorkspaceId;
-      const c = id ? chats.get(id) : undefined;
-      if (!debugMode) return { ok: false, code: 'debug_disabled' };
-      if (!c) return { ok: false, code: 'no_workspace' };
-      return fn(c, arg);
-    });
-  diagHandle('diag:state', (c) => c.adapter.getPageState());
-  diagHandle('diag:capture', (c) => c.adapter.getLatestClaudePromptBlock());
-  diagHandle('diag:latest-user', (c) => c.adapter.getLatestUserMessage());
-  diagHandle('diag:mic-status', () => ({ microphone: systemPreferences.getMediaAccessStatus('microphone') }));
-  diagHandle('diag:home', (c) => c.view.webContents.loadURL(CHATGPT_HOME_URL).then(() => ({ ok: true })));
-  diagHandle('diag:insert', (c, arg) =>
-    typeof arg === 'string' && arg.length > 0 && arg.length <= MAX_PROMPT_CHARS ? c.adapter.insertComposerText(arg) : { ok: false, code: 'invalid_input' },
-  );
-  diagHandle('diag:submit', (c) => c.adapter.submitComposer());
 
   // ---------- App Settings (app menu → Settings…) ----------
 
   const appSettings = (): AppSettings => ({
-    autoSendOnRequest: orchestrator.autoSendEnabled(),
-    developerMode: debugMode,
     defaultModel,
     version: app.getVersion(),
     userDataPath: userData,
   });
-  // Both are mirrored by menu checkboxes; every window gets the change through the state push.
-  const setAutoSend = (on: boolean) => {
-    orchestrator.setAutoSendEnabled(on);
-    buildMenu();
-    broadcast();
-  };
-  const setDebugMode = (on: boolean) => {
-    debugMode = on;
-    buildMenu();
-    broadcast();
-  };
   handle('app:get-settings', () => appSettings());
-  handle('app:update-settings', (raw) => {
-    const v = validateAppSettingsPatch(raw);
-    if (!v.ok) return { ok: false, code: 'invalid', detail: v.detail };
-    if (v.patch.autoSendOnRequest !== undefined) setAutoSend(v.patch.autoSendOnRequest);
-    if (v.patch.developerMode !== undefined) setDebugMode(v.patch.developerMode);
-    return { ok: true, settings: appSettings() };
-  });
   handle('app:reveal-user-data', () => shell.showItemInFolder(join(userData, 'workspace-state.json')));
   handle('app:open-coffee', () => shell.openExternal(BUY_ME_A_COFFEE_URL));
 
@@ -1033,30 +948,10 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
         ],
       },
       { role: 'editMenu' },
-      {
-        label: 'Workspace',
-        submenu: [
-          { label: 'Send to Claude…', accelerator: 'CmdOrCtrl+Shift+Enter', click: () => command('send-to-claude') },
-          { type: 'separator' },
-          {
-            // D034: when the user's own ChatGPT message asks for it, the ready prompt is sent after a cancellable countdown.
-            label: 'Auto-send when I ask ChatGPT',
-            type: 'checkbox',
-            checked: orchestrator.autoSendEnabled(),
-            click: (item) => setAutoSend(item.checked),
-          },
-        ],
-      },
       { label: 'View', submenu: [{ role: 'togglefullscreen' }] },
       {
         label: 'Developer',
         submenu: [
-          {
-            label: 'Diagnostics',
-            type: 'checkbox',
-            checked: debugMode,
-            click: (item) => setDebugMode(item.checked),
-          },
           { label: 'Shell DevTools', click: () => focusedWindow().win.webContents.openDevTools({ mode: 'detach' }) },
           {
             label: 'ChatGPT DevTools (active Workspace)',
@@ -1113,7 +1008,8 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     }
     // Secondary windows close without handing their tabs back; nothing about windows is persisted.
     quitting = true;
-    clearInterval(poll);
+    clearInterval(loginPoll);
+    clearInterval(blockSendPoll);
     updates.stop();
     orchestrator.shutdown();
     pty.stopAll();

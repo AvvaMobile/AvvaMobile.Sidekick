@@ -4,7 +4,6 @@ import { join, relative } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createDiagnosticsLog } from '../main/diagnostics/diagnosticsLog';
 import { DevelopmentPaneRegistry } from '../main/development/DevelopmentPane';
-import { HandoffController } from '../main/orchestration/HandoffController';
 
 /**
  * D022: ChatGPT planning activity and the Claude/terminal development pane are isolated.
@@ -58,14 +57,11 @@ describe('ChatGPT / development pane isolation (D022)', () => {
     panes.writeOutput('b', 'pty', 'b$ ');
     const outputs = vi.fn();
     panes.onEvent(outputs);
-    const handoff = new HandoffController();
     const diag = createDiagnosticsLog(join(mkdtempSync(join(tmpdir(), 'ws-diag-')), 'events.log'), { console: false });
 
     // Simulate a normal ChatGPT exchange in workspace "a": navigation, permission checks, streaming reply.
     diag('did-navigate-in-page https://chatgpt.com/c/123');
     diag('permission check clipboard-sanitized-write https://chatgpt.com -> ALLOW');
-    for (let i = 0; i < 10; i++)
-      handoff.observeCandidate('a', { text: `reply ${i}`, messageId: 'm', conversationUrl: null, truncated: false, capturedAt: '' });
 
     expect(readFileSync(diag.file, 'utf8')).toContain('did-navigate-in-page');
     expect(ptyA.write).not.toHaveBeenCalled();
@@ -73,6 +69,5 @@ describe('ChatGPT / development pane isolation (D022)', () => {
     expect(outputs).not.toHaveBeenCalled();
     expect(panes.snapshot('a')).toBe('');
     expect(panes.snapshot('b')).toBe('b$ ');
-    expect(handoff.getCandidate('a')?.text).toBe('reply 9');
   });
 });

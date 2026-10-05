@@ -60,9 +60,11 @@ An interactive PTY terminal is also available for manual use.
 
 Superseded by D033.
 
-## D008 - Approval-gated review handback
+## D008 - Approval-gated review handback (superseded by D044)
 
-Decision:
+Superseded: the handback is now automatic for managed tasks; see D044.
+
+Decision (historical):
 Claude completion produces a local review packet and notifies the user. Workspace asks whether it should be sent to ChatGPT. Only user approval causes insertion/submission to ChatGPT.
 
 Reason:
@@ -129,17 +131,13 @@ The selected project, running state and attention/completion state must be visua
 
 Superseded by D038.
 
-## D017 - Claude Prompt block contract
+## D017 - Claude Prompt block contract (superseded by D046)
 
-Decision:
-A prompt intended for Claude is rendered by ChatGPT as a distinct copyable fenced/code block. Send to Claude targets the most recent designated Claude Prompt block, not the entire conversation and not an arbitrary assistant response.
+Removed: the mechanism this decision described no longer exists. See D046.
 
-## D018 - Send to Claude has voice and button paths
+## D018 - Send to Claude has voice and button paths (superseded by D046)
 
-Decision:
-The same delegation command can be invoked from a visible button or a narrowly recognized explicit voice command after feasibility is proven.
-
-Both routes freeze and send exactly the same prompt candidate.
+Removed: the mechanism this decision described no longer exists. See D046.
 
 ## D019 - One default Claude session per Workspace
 
@@ -185,13 +183,13 @@ M0 regression: the spike's right panel received every ChatGPT navigation/permiss
 ## D023 - Resizable split, persisted per Workspace
 
 Decision:
-A draggable vertical splitter separates the ChatGPT and development columns. Minimum widths: ChatGPT 360 px, development pane 320 px, splitter 6 px. The split ratio is stored per Workspace (`WorkspaceUiState.splitRatio`) and restored when that Workspace is selected. Five layout presets (Terminal only, GPT 20/80, 50/50, 80/20, GPT only) sit at the right end of the tab strip and act on the window's active Workspace; the mode is stored per Workspace (`WorkspaceUiState.layoutMode`, absent in older records = `custom`, so saved ratios keep working). Presets are ratios clamped to the minimum widths; dragging the splitter switches the Workspace to `custom`. Hidden panes are only hidden (ChatGPT view `setVisible(false)`, terminal frame `visibility:hidden` at its normal size), never destroyed or resized to zero.
+A draggable vertical splitter separates the ChatGPT and development columns. Minimum widths: ChatGPT 360 px, development pane 320 px, splitter 6 px. The split ratio is stored per Workspace (`WorkspaceUiState.splitRatio`) and restored when that Workspace is selected. The five layout presets that once sat next to the tabs were replaced by three views in D043. Hidden panes are only hidden (ChatGPT view `setVisible(false)`, terminal frame `visibility:hidden` at its normal size), never destroyed or resized to zero.
 
 Geometry is computed by one pure module (`src/domain/layout/splitPane.ts`) used by both the renderer and the main process. During a drag the renderer updates its own layout immediately and sends at most one fire-and-forget ratio update per animation frame; the main process only calls `setBounds` on the existing ChatGPT WebContentsView. The ratio is persisted on drag end only.
 
 Resizing never reloads, navigates or recreates the ChatGPT view, never restarts a PTY or Claude process and never resets a session or buffer. No animation.
 
-## D024 - Send to Claude is a two-step trusted-shell action with preview
+## D024 - Send to Claude is a two-step trusted-shell action with preview (superseded by D046)
 
 Decision:
 Send to Claude lives in the trusted local shell (development pane header), never in the remote ChatGPT view. It operates only on the latest designated Claude Prompt block of the selected Workspace.
@@ -205,12 +203,12 @@ The user must see the exact prompt before execution; duplicate clicks or later C
 
 Superseded by D029.
 
-## D025 - Adapter diagnostics are development-only
+## D025 - Adapter diagnostics are development-only (removed by D047)
 
 Decision:
 The ChatGPT adapter diagnostic controls (first built for the M0 feasibility harness) are not product UI. In the product shell they exist only behind Developer → Diagnostics (off by default) and the main process refuses diagnostic IPC calls while the switch is off.
 
-The separate M0 harness (`--m0` entry point) was later removed from the codebase; the in-app Developer → Diagnostics panel remains.
+Removed: the M0 harness and, by D047, the in-app Developer → Diagnostics panel.
 
 ## D026 - Managed Claude activity and manual terminal are separate surfaces
 
@@ -226,15 +224,11 @@ Managed runs use `claude -p --output-format stream-json --verbose [--resume <ses
 
 Superseded by D033 (the principle stands: the user's own permission configuration, no permission flags).
 
-## D028 - Designated Claude Prompt: fenced block or Claude-titled writing block
+## D028 - Designated Claude Prompt: fenced block or Claude-titled writing block (superseded by D046)
 
-Decision:
-Besides a ```` ```claude-prompt ```` fenced block, a ChatGPT writing block whose title mentions "Claude" (or whose label is `claude-prompt`) is a designated Claude Prompt block. Its markdown text (`data-markdown-copy-text`) is the candidate. A newly seen block becomes the candidate only after two consecutive identical observations (about 1 s apart), so a block that is still being written never enables Send to Claude.
+Removed: the mechanism this decision described no longer exists. See D046.
 
-Reason:
-In the 2026 logged-in UI, ChatGPT answers "write a prompt for Claude" with a titled writing block rather than a fenced code block. Preview + explicit confirmation (D024) still guard execution.
-
-## D029 - One-click Send to Claude, terminal-only development pane (supersedes parts of D024 and D026)
+## D029 - One-click Send to Claude, terminal-only development pane (supersedes parts of D024 and D026) (send mechanism superseded by D046)
 
 Decision (user direction, 2026-10-01):
 
@@ -246,15 +240,11 @@ Safeguards kept:
 - The button is enabled only for a stable designated block (D028) of the selected Workspace, never while a task runs or a send is in progress; concurrent clicks start at most one task.
 - A prompt identical to the last successfully completed task's prompt is refused ("already run"); a failed task's prompt can be re-run.
 - Managed completion still comes only from the Claude `result` event + process exit; PTY input/output never changes task state (D020).
-- Review handback remains approval-gated (D008): a compact bar above the terminal offers "Send to ChatGPT for review" / "Retry review".
+- Review handback was approval-gated here (D008); superseded by the automatic handback of D044 (only "Retry" remains, after a failed delivery).
 
-## D030 - Prompt detection fallback: plain-text block in a reply that hands work to Claude
+## D030 - Prompt detection fallback: plain-text block in a reply that hands work to Claude (superseded by D046)
 
-Decision:
-If an assistant reply contains no designated block (D017/D028) but its prose — text outside code/writing blocks — mentions Claude (e.g. "Claude'a bunu ver:"), its last plain-text/markdown code block (`Plain text`, `text`, `markdown`, `prompt` or unlabeled) is the Claude Prompt candidate. Code blocks in any other language are never used. The 2026 UI renders fenced blocks as `[data-markdown-copy="code-block"]` (no `<pre>`) with the language label in the header; both forms are supported.
-
-Reason:
-ChatGPT often answers "send this to Claude" with an untagged plain-text block. The prompt shown in the terminal at start, the stable-candidate rule and the "already run" guard remain.
+Removed: the mechanism this decision described no longer exists. See D046.
 
 ## D031 - Product name Avva Mobile Sidekick (supersedes D002's product name)
 
@@ -263,25 +253,17 @@ The desktop product is named **Avva Mobile Sidekick** and uses the Avva Mobile l
 
 Development: `npm run app` launches `.dev/Avva Mobile Sidekick.app`, an APFS clone of the stock Electron.app with the product name, bundle id `com.avvamobile.sidekick.dev` and icon, re-signed ad hoc (`scripts/dev-bundle.cjs`, rebuilt only when Electron or the icon changes). Dock, app switcher and menu bar therefore show the product name in development too. Because the bundle id differs from stock Electron, macOS asks again for microphone/notification permission once.
 
-## D032 - Any ChatGPT box is a prompt candidate (supersedes D028's title rule and D030)
+## D032 - Any ChatGPT box is a prompt candidate (supersedes D028's title rule and D030) (superseded by D046)
 
-Decision:
-Per assistant reply, newest first: a tagged block wins (```` ```claude-prompt ```` fence/label, or a writing block titled with Claude/`claude-prompt`); otherwise the reply's last "box" is the candidate — any writing block regardless of title (its markdown, with a single outer ```` ``` ```` fence removed), or a plain-text/markdown/unlabeled code block. Code blocks in a programming language (bash, ts, …) are never candidates. A later reply without a box keeps the earlier prompt as the candidate.
-
-Reason:
-ChatGPT titles its boxes freely ("Workspace Repository Sync and Status Audit Prompt") and rarely mentions Claude; requiring the word "Claude" kept Send to Claude disabled. The user's explicit click, the prompt header printed in the terminal and the "already run" guard (D029) remain the safeguards.
+Removed: the mechanism this decision described no longer exists. See D046.
 
 ## D033 - The terminal always runs interactive Claude Code (supersedes the `claude -p` runner of D027/D029)
 
 The right-hand terminal of every Workspace starts `claude --settings <Stop hook> [--resume <session>]` (not a login shell), so the user's own Claude settings, status line footer and permissions apply. Restart starts a fresh session. Send to Claude pastes the frozen prompt into that Claude and submits it (`InteractiveClaudeRunner`); completion comes only from the Claude `Stop` hook, which drops a JSON payload into a per-Workspace directory (`<userData>/hook-events/<id>`, `StopHookChannel`). Cancel sends Escape. Managed activity is no longer rendered into the terminal (it would corrupt Claude's screen); evidence, review packet and handback are unchanged.
 
-## D034 - Auto-send when the user asks ChatGPT to send the prompt to Claude
+## D034 - Auto-send when the user asks ChatGPT to send the prompt to Claude (superseded by D046)
 
-Decision:
-When a new Claude Prompt becomes ready (first time its ChatGPT message is seen, D032 rules) and the user's own latest ChatGPT message explicitly asks for it to go to Claude ("bu promptu Claude'a gönder", "send this to Claude", voice spellings like "Klod'a ilet"), the prompt is sent through the normal Send to Claude path (trigger `auto_user_request`) after a 3-second countdown shown in the development pane with a Cancel button. Detection is a conservative pure function (`src/domain/handoff/autoSend.ts`): imperative send verbs only; negation, deferral or condition words near the phrase ("gönderme", "önce", "ama", "don't", "not yet", "later", "if") reject it. The countdown is cancelled when the candidate changes or disappears, ChatGPT starts writing again, the user sends manually, the Workspace closes or the setting is turned off. A ChatGPT message is never auto-sent twice, and messages already seen before a restart never auto-send. Global setting Workspace → "Auto-send when I ask ChatGPT", default on, persisted in `preferences.autoSendOnRequest`.
-
-Reason:
-The user's own message is explicit delegation (SECURITY §16); ChatGPT output alone still never launches Claude. Prefer false negatives: the button remains the fallback.
+Removed: the mechanism this decision described no longer exists. See D046.
 
 ## D035 - Project identifiers renamed to AvvaMobile.Sidekick
 
@@ -311,7 +293,7 @@ Packaged installs (D036) reach users who may lack the CLI tools; asking for the 
 Decision:
 Open Workspaces are shown as browser-style tabs in a tab strip at the top of the window (`src/renderer/shell/components/TabBar.tsx`), not in a sidebar. Tabs are reordered by dragging and carry a badge for running / finished / failed. `+` opens the Projects start page, which lists all saved Workspaces; closing a tab keeps the saved Workspace.
 
-A tab can be moved into its own window (right-click → Move to New Window, and back with Move to Main Window). Each open tab lives in exactly one window; each window has its own active tab, split layout and relay overlay, and its renderer sees only its own tabs (`src/main/app/shellWindows.ts`). Runtimes (ChatGPT view, terminal Claude, orchestrator) are shared and never recreated by switching or moving tabs, so D015 still holds.
+A tab can be moved into its own window (right-click → Move to New Window, and back with Move to Main Window). Each open tab lives in exactly one window; each window has its own active tab, split layout, and its renderer sees only its own tabs (`src/main/app/shellWindows.ts`). Runtimes (ChatGPT view, terminal Claude, orchestrator) are shared and never recreated by switching or moving tabs, so D015 still holds.
 
 Reason:
 Tabs show project names instead of initials and scale better; separate windows let projects sit side by side on several screens.
@@ -324,7 +306,7 @@ The `AvvaMobile/AvvaMobile.Sidekick` repository is public and licensed under MIT
 Reason:
 Users install and update from public releases built from public source, so they can verify what they run.
 
-## D040 - Copy uses Claude's final response, not the terminal
+## D040 - Copy uses Claude's final response, not the terminal (removed by D047)
 
 Decision:
 The development pane's Copy copies from the last completed Claude response of the Workspace (Stop hook `last_assistant_message`, transcript fallback), kept in memory by `ResponseCopier` and written to the clipboard by the main process. Fenced Markdown blocks (backtick/tilde, CommonMark closing rules, list indentation stripped) are parsed from that raw text (`src/domain/response/codeBlocks.ts`): one block → its body only (no fences, label or prose); several → a menu (Code block N — language, Full response); none → the full response; ▾ always offers "Copy full response". Copy never writes `/copy` to the terminal, never scrapes terminal output and works while a task runs.
@@ -336,7 +318,7 @@ Terminal text carries renderer decorations and wrapping, so selecting code there
 
 Decision:
 A managed Claude task (`InteractiveClaudeRunner`) ends only from hook and process signals, never from terminal output: the `Stop` hook after our prompt was acknowledged, the user's Escape / Ctrl+C in the terminal (`StopHookChannel.interrupt` → task `cancelled`), the terminal process ending or being replaced (`PtyService.relaunch`/`restartIn` now notify exit listeners), or no `UserPromptSubmit` for our prompt while Claude is idle for 30 s (task fails). The renderer's STOP, and every control that depends on a running task, derives from the task status, which is final as soon as the run ends.
-The latest completed result (`WorkspaceView.latestReview`) is independent of the active task: it stays available for Send to ChatGPT while a later task runs, a later success replaces it, a later cancelled task does not. Copy works from the last response regardless of a running task.
+The latest completed result (`WorkspaceView.latestReview`) is independent of the active task: it stays available for Retry (a failed delivery, D044) while a later task runs, a later success replaces it, a later cancelled task does not. Copy works from the last response regardless of a running task.
 Clear keeps its purpose (`/clear` clears Claude's context) and is disabled only while a managed task runs: typed mid-turn it would be queued into that turn. Model and effort can be changed while a task runs; the choice is stored at once and the terminal's Claude is relaunched (same session) only when nothing is running any more (`DeferredRelaunch`).
 
 Reason:
@@ -351,3 +333,53 @@ Current authentication mechanism (temporary): `GH_TOKEN`, then `GITHUB_TOKEN`, t
 
 Reason:
 Syntactic validity proves nothing about access, and permissions change. Reusing an existing login avoids new auth architecture until a real connection flow is designed.
+
+## D043 - Three views per Workspace: ChatGPT Focus, Split, Claude Focus
+
+Decision:
+The handoff (ChatGPT plans -> send intent -> Claude works -> result returns to ChatGPT automatically, D044) is one per-Workspace task lifecycle that does not know about layout. A Workspace's view only decides what is visible (`SplitLayoutController`, pure geometry in `src/domain/layout/viewMode.ts`, shared with the renderer):
+- ChatGPT Focus: ChatGPT fills the work area above a slim Claude bar (Idle / Running + Stop / Completed, sending result / Result delivered / Delivery failed + Retry, Send to Claude, Open Claude -> Claude Focus, the auto-send countdown). The terminal frame is hidden at its normal size; the PTY and Claude keep running.
+- Split: ChatGPT | terminal with the free draggable splitter and the Workspace's saved ratio. There are no buttons between the panes.
+- Claude Focus: the terminal fills the work area; the ChatGPT view is only hidden.
+Switching views only calls `setBounds`/`setVisible`; nothing is recreated and no task, session, prompt or terminal buffer changes. The split ratio is written only by the divider, so Focus views never overwrite it.
+The view is stored per Workspace as the optional `uiState.viewMode` (`chatgpt-focus` | `split` | `claude-focus`); default Split. The removed presets are migrated when read: `uiState.layoutMode` `terminal-hidden` -> ChatGPT Focus, `gpt-hidden` -> Claude Focus, anything else Split; `split-20-80` / `split-50-50` / `split-80-20` continue as that ratio. `layoutMode` is never deleted, and when the divider is dragged it is set to `custom`, so master (which ignores `viewMode`) shows the same ratio after a rollback.
+Limits: the ChatGPT Focus bar takes 34 px of height; no view has a Send to ChatGPT button (D044).
+
+## D044 - ChatGPT -> Claude on explicit send intent; managed completion -> ChatGPT automatically (outbound send intent superseded by D046; automatic handback stays)
+
+Decision:
+- ChatGPT -> Claude is triggered only by explicit user send intent: the Send to Claude button/shortcut, or the user's own ChatGPT message ("bunu Claude'a gönder", "send this to Claude", D034) followed by the 3 s cancellable countdown. This works in every view, with the terminal hidden or visible.
+- Managed Claude completion -> ChatGPT handback is automatic. When a managed task (one started by that workflow) succeeds, Sidekick builds the bounded review packet (Claude's result + Git evidence, no prompt suffix) and inserts and submits it into the ChatGPT conversation the task came from, without a click. Failed or cancelled tasks are not handed back.
+- Manual Claude turns (typed or pasted in the terminal, e.g. in Claude Focus) are not managed tasks and are never handed back.
+- Manual intervention is needed only when automatic delivery fails. The packet is kept, the task stays `review_pending`, the Workspace shows "Result delivery failed" and a compact Retry. Retry re-delivers the stored packet; it never re-runs Claude. There is no Send to ChatGPT button in any view, and no relay buttons.
+
+Routing: the task records `sourceConversationUrl` (origin + path of the ChatGPT conversation visible at send time) and belongs to one Workspace, whose own ChatGPT view receives the result. Before inserting, `ChatGPTAdapter.ensureConversation` checks that the view shows that exact conversation, navigates back to it if the user moved elsewhere in the Workspace, and fails (nothing inserted) if the source is unknown, cannot be opened or ChatGPT lands elsewhere. It never posts into whatever is visible, and other Workspaces are never touched. While ChatGPT is replying, or the message box holds a draft, delivery waits (about 3 min at most) and never overwrites a draft; then it fails with Retry. A delivery interrupted by quitting becomes "failed" on the next start.
+
+Reason:
+The product experience is "ChatGPT plans, Claude works in the background, ChatGPT reviews". A click after every managed run defeated it, while the explicit send intent on the way out keeps control where it matters. Strict conversation identity prevents a result from landing in the wrong project or conversation.
+
+## D045 - Sidekick command interception: handoff commands are stopped before ChatGPT submits them (superseded by D046)
+
+Removed: the mechanism this decision described no longer exists. See D046.
+
+## D046 - Per-block Send to Claude button is the only ChatGPT -> Claude path
+
+Decision:
+- Every prompt/code block of an assistant reply gets its own **Send to Claude** button, injected right after the block's Copy button (page script in the isolated world, `installBlockSendButtonsScript`).
+- A trusted click sends exactly the text of the block that holds the clicked button, read at click time. No stored or detected candidate, no other block, no appended text; the text is only sanitized for the terminal.
+- The button shows sending, then *Sent to Claude ✓* only after Claude's `UserPromptSubmit` hook confirmed the prompt (`submitted` runner event); a refusal (Claude busy, ChatGPT still writing, empty block), an unconfirmed prompt, a cancel or a crash shows *Send failed — Retry* with the reason on that same button. Retry re-reads the block and starts a new send.
+- Removed: candidate detection and the `claude-prompt` tag/box rules (D017, D028, D030, D032), prompt polling, text/voice commands and their pre-submit interception (D034, D045), the auto-send countdown, the ⌘⇧↵ shortcut and menu item, the Send button in the status bar/divider, the "Append to Claude prompts" and "Auto-send" settings, the flow log and the Capture/Latest-user diagnostics. A short login poll remains.
+- Unchanged: the managed task lifecycle, review packet and the automatic handback to the originating conversation with Retry (D044), the status bar (state, Stop, delivery Retry, Open Claude).
+
+Reason:
+Detecting "the" prompt and guessing intent sent the wrong text more than once. The block the user points at is the only unambiguous source of truth, and confirming receipt through Claude's own hook keeps a failed send from looking successful.
+
+## D047 - Cleanup: exactly two send paths remain; Diagnostics and Copy-last-response removed
+
+Decision:
+- Kept: (A) the per-block *Send to Claude* button -> that block's exact text -> a managed task of that Workspace (D046); (B) that task's own final result -> review packet -> automatic handback to the same Workspace and originating conversation, with Retry on failure (D044). Verified in the real app (new task started by a real click, result delivered to and answered in the same conversation).
+- Removed: Developer -> Diagnostics (it could insert text into and submit the ChatGPT composer), the `diag:*` IPC, the developer-mode setting and `SIDEKICK_DEVELOPER`, the *Copy* button for Claude's last response (`ResponseCopier`, `response:*` IPC, code-block parsing), the "your own run finished" notification for manual terminal turns, the unused page-state fields (message counts, voice button, DOM fingerprint) and the unused `allowNonEmpty` composer option.
+- Unchanged: manual Claude terminal use (never forwarded to ChatGPT), the diagnostics log file (`events.log`: lifecycle, navigation and permission decisions), the layout-preset migration and the profile folder migration (not send paths).
+
+Reason:
+Every extra way to move text between ChatGPT and Claude is a way to send the wrong text. Only the two verified paths stay.

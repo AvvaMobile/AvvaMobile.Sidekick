@@ -9,9 +9,13 @@ export interface TaskError {
 
 export interface TaskRecord {
   readonly id: string;
+  /** Random per-task secret of the START/END final-output markers (absent on tasks created before markers). */
+  readonly nonce?: string;
   readonly workspaceId: string;
   /** Frozen at creation (queued); never modified afterwards. */
   readonly prompt: string;
+  /** Older versions only: the ChatGPT prompt before the "Append to Claude prompts" text was added; never set now. */
+  readonly originalPrompt?: string;
   readonly sourceConversationUrl: string | null;
   readonly sourceAssistantMessageId: string | null;
   readonly createdAt: string;
@@ -48,6 +52,11 @@ export function transition(task: TaskRecord, to: TaskStatus): void {
   task.status = to;
 }
 
+/** The prompt as ChatGPT wrote it, without the text older versions appended ("Append to Claude prompts"). */
+export function sourcePrompt(task: Pick<TaskRecord, 'prompt' | 'originalPrompt'>): string {
+  return task.originalPrompt ?? task.prompt;
+}
+
 /** A task that still owns (or is about to own) the Workspace's Claude process. */
 export function isTaskActive(task: TaskRecord | null | undefined): boolean {
   return !!task && (task.status === 'queued' || task.status === 'running');
@@ -55,8 +64,10 @@ export function isTaskActive(task: TaskRecord | null | undefined): boolean {
 
 export function newTask(args: {
   id: string;
+  nonce?: string;
   workspaceId: string;
   prompt: string;
+  originalPrompt?: string;
   sourceConversationUrl: string | null;
   sourceAssistantMessageId: string | null;
   claudeSessionIdBefore: string | null;
@@ -64,8 +75,10 @@ export function newTask(args: {
 }): TaskRecord {
   return {
     id: args.id,
+    ...(args.nonce ? { nonce: args.nonce } : {}),
     workspaceId: args.workspaceId,
     prompt: args.prompt,
+    ...(args.originalPrompt !== undefined && args.originalPrompt !== args.prompt ? { originalPrompt: args.originalPrompt } : {}),
     sourceConversationUrl: args.sourceConversationUrl,
     sourceAssistantMessageId: args.sourceAssistantMessageId,
     createdAt: args.now,

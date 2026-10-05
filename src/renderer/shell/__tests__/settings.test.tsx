@@ -27,8 +27,6 @@ const project = (over: Partial<ProjectSettingsData> = {}): ProjectSettingsData =
   ...over,
 });
 const appData = (over: Partial<AppSettingsData> = {}): AppSettingsData => ({
-  autoSendOnRequest: true,
-  developerMode: false,
   defaultModel: 'sonnet',
   version: '0.1.0',
   userDataPath: '/Users/x/Library/Application Support/AvvaMobile.Sidekick',
@@ -47,7 +45,6 @@ function fakeApi(p = project(), a = appData()) {
     closeWorkspace: vi.fn(async () => ({ ok: true as const })),
     removeWorkspace: vi.fn(async () => ({ ok: false as const, code: 'cancelled' })),
     getAppSettings: vi.fn(async () => a),
-    updateAppSettings: vi.fn(async (patch: object) => ({ ok: true as const, settings: { ...a, ...patch } })),
     revealUserData: vi.fn(async () => {}),
   };
 }
@@ -157,25 +154,16 @@ describe('settings screens', () => {
       return { f, onClose };
     };
 
-    it('renders preferences, the read-only default model and About', async () => {
+    it('renders the read-only default model and About', async () => {
       await render();
-      expect((host.querySelector('input[aria-label="Auto-send when I ask ChatGPT"]') as HTMLInputElement).checked).toBe(true);
-      expect((host.querySelector('input[aria-label="Developer mode"]') as HTMLInputElement).checked).toBe(false);
       expect(host.textContent).toContain('Sonnet');
       expect(host.textContent).toContain('0.1.0');
       expect(host.textContent).toContain('/Users/x/Library/Application Support/AvvaMobile.Sidekick');
       expect(button(host, 'Reveal in Finder')).toBeTruthy();
     });
 
-    it('toggles save immediately', async () => {
+    it('reveals the app data folder', async () => {
       const { f } = await render();
-      act(() => (host.querySelector('input[aria-label="Developer mode"]') as HTMLInputElement).click());
-      await flush();
-      expect(f.updateAppSettings).toHaveBeenCalledWith({ developerMode: true });
-      expect((host.querySelector('input[aria-label="Developer mode"]') as HTMLInputElement).checked).toBe(true);
-      act(() => (host.querySelector('input[aria-label="Auto-send when I ask ChatGPT"]') as HTMLInputElement).click());
-      await flush();
-      expect(f.updateAppSettings).toHaveBeenCalledWith({ autoSendOnRequest: false });
       act(() => button(host, 'Reveal in Finder').click());
       expect(f.revealUserData).toHaveBeenCalled();
     });
