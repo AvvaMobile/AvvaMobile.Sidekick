@@ -60,9 +60,11 @@ An interactive PTY terminal is also available for manual use.
 
 Superseded by D033.
 
-## D008 - Approval-gated review handback
+## D008 - Approval-gated review handback (superseded by D044)
 
-Decision:
+Superseded: the handback is now automatic for managed tasks; see D044.
+
+Decision (historical):
 Claude completion produces a local review packet and notifies the user. Workspace asks whether it should be sent to ChatGPT. Only user approval causes insertion/submission to ChatGPT.
 
 Reason:
@@ -246,7 +248,7 @@ Safeguards kept:
 - The button is enabled only for a stable designated block (D028) of the selected Workspace, never while a task runs or a send is in progress; concurrent clicks start at most one task.
 - A prompt identical to the last successfully completed task's prompt is refused ("already run"); a failed task's prompt can be re-run.
 - Managed completion still comes only from the Claude `result` event + process exit; PTY input/output never changes task state (D020).
-- Review handback remains approval-gated (D008): a compact bar above the terminal offers "Send to ChatGPT for review" / "Retry review".
+- Review handback was approval-gated here (D008); superseded by the automatic handback of D044 (only "Retry" remains, after a failed delivery).
 
 ## D030 - Prompt detection fallback: plain-text block in a reply that hands work to Claude
 
@@ -311,7 +313,7 @@ Packaged installs (D036) reach users who may lack the CLI tools; asking for the 
 Decision:
 Open Workspaces are shown as browser-style tabs in a tab strip at the top of the window (`src/renderer/shell/components/TabBar.tsx`), not in a sidebar. Tabs are reordered by dragging and carry a badge for running / finished / failed. `+` opens the Projects start page, which lists all saved Workspaces; closing a tab keeps the saved Workspace.
 
-A tab can be moved into its own window (right-click → Move to New Window, and back with Move to Main Window). Each open tab lives in exactly one window; each window has its own active tab, split layout and relay overlay, and its renderer sees only its own tabs (`src/main/app/shellWindows.ts`). Runtimes (ChatGPT view, terminal Claude, orchestrator) are shared and never recreated by switching or moving tabs, so D015 still holds.
+A tab can be moved into its own window (right-click → Move to New Window, and back with Move to Main Window). Each open tab lives in exactly one window; each window has its own active tab, split layout, and its renderer sees only its own tabs (`src/main/app/shellWindows.ts`). Runtimes (ChatGPT view, terminal Claude, orchestrator) are shared and never recreated by switching or moving tabs, so D015 still holds.
 
 Reason:
 Tabs show project names instead of initials and scale better; separate windows let projects sit side by side on several screens.
@@ -336,7 +338,7 @@ Terminal text carries renderer decorations and wrapping, so selecting code there
 
 Decision:
 A managed Claude task (`InteractiveClaudeRunner`) ends only from hook and process signals, never from terminal output: the `Stop` hook after our prompt was acknowledged, the user's Escape / Ctrl+C in the terminal (`StopHookChannel.interrupt` → task `cancelled`), the terminal process ending or being replaced (`PtyService.relaunch`/`restartIn` now notify exit listeners), or no `UserPromptSubmit` for our prompt while Claude is idle for 30 s (task fails). The renderer's STOP, and every control that depends on a running task, derives from the task status, which is final as soon as the run ends.
-The latest completed result (`WorkspaceView.latestReview`) is independent of the active task: it stays available for Send to ChatGPT while a later task runs, a later success replaces it, a later cancelled task does not. Copy works from the last response regardless of a running task.
+The latest completed result (`WorkspaceView.latestReview`) is independent of the active task: it stays available for Retry (a failed delivery, D044) while a later task runs, a later success replaces it, a later cancelled task does not. Copy works from the last response regardless of a running task.
 Clear keeps its purpose (`/clear` clears Claude's context) and is disabled only while a managed task runs: typed mid-turn it would be queued into that turn. Model and effort can be changed while a task runs; the choice is stored at once and the terminal's Claude is relaunched (same session) only when nothing is running any more (`DeferredRelaunch`).
 
 Reason:
@@ -355,11 +357,23 @@ Syntactic validity proves nothing about access, and permissions change. Reusing 
 ## D043 - Three views per Workspace: ChatGPT Focus, Split, Claude Focus
 
 Decision:
-The handoff (ChatGPT plans -> Send to Claude -> Claude works -> result -> optional Send to ChatGPT) is one per-Workspace task lifecycle that does not know about layout. A Workspace's view only decides what is visible (`SplitLayoutController`, pure geometry in `src/domain/layout/viewMode.ts`, shared with the renderer):
-- ChatGPT Focus: ChatGPT fills the work area above a slim Claude bar (Idle / Running + Stop / Result ready + Send to ChatGPT, Send to Claude, Open Claude -> Claude Focus, the auto-send countdown). The terminal frame is hidden at its normal size; the PTY and Claude keep running.
-- Split: ChatGPT | terminal with the free draggable splitter and the Workspace's saved ratio; the relay buttons sit on the divider.
+The handoff (ChatGPT plans -> send intent -> Claude works -> result returns to ChatGPT automatically, D044) is one per-Workspace task lifecycle that does not know about layout. A Workspace's view only decides what is visible (`SplitLayoutController`, pure geometry in `src/domain/layout/viewMode.ts`, shared with the renderer):
+- ChatGPT Focus: ChatGPT fills the work area above a slim Claude bar (Idle / Running + Stop / Completed, sending result / Result delivered / Delivery failed + Retry, Send to Claude, Open Claude -> Claude Focus, the auto-send countdown). The terminal frame is hidden at its normal size; the PTY and Claude keep running.
+- Split: ChatGPT | terminal with the free draggable splitter and the Workspace's saved ratio. There are no buttons between the panes.
 - Claude Focus: the terminal fills the work area; the ChatGPT view is only hidden.
 Switching views only calls `setBounds`/`setVisible`; nothing is recreated and no task, session, prompt or terminal buffer changes. The split ratio is written only by the divider, so Focus views never overwrite it.
 The view is stored per Workspace as the optional `uiState.viewMode` (`chatgpt-focus` | `split` | `claude-focus`); default Split. The removed presets are migrated when read: `uiState.layoutMode` `terminal-hidden` -> ChatGPT Focus, `gpt-hidden` -> Claude Focus, anything else Split; `split-20-80` / `split-50-50` / `split-80-20` continue as that ratio. `layoutMode` is never deleted, and when the divider is dragged it is set to `custom`, so master (which ignores `viewMode`) shows the same ratio after a rollback.
-Limits: the ChatGPT Focus bar takes 34 px of height; Claude Focus has no Send to ChatGPT button (the tab badge shows a ready result).
+Limits: the ChatGPT Focus bar takes 34 px of height; no view has a Send to ChatGPT button (D044).
 
+## D044 - ChatGPT -> Claude on explicit send intent; managed completion -> ChatGPT automatically
+
+Decision:
+- ChatGPT -> Claude is triggered only by explicit user send intent: the Send to Claude button/shortcut, or the user's own ChatGPT message ("bunu Claude'a gönder", "send this to Claude", D034) followed by the 3 s cancellable countdown. This works in every view, with the terminal hidden or visible.
+- Managed Claude completion -> ChatGPT handback is automatic. When a managed task (one started by that workflow) succeeds, Sidekick builds the bounded review packet (Claude's result + Git evidence, no prompt suffix) and inserts and submits it into the ChatGPT conversation the task came from, without a click. Failed or cancelled tasks are not handed back.
+- Manual Claude turns (typed or pasted in the terminal, e.g. in Claude Focus) are not managed tasks and are never handed back.
+- Manual intervention is needed only when automatic delivery fails. The packet is kept, the task stays `review_pending`, the Workspace shows "Result delivery failed" and a compact Retry. Retry re-delivers the stored packet; it never re-runs Claude. There is no Send to ChatGPT button in any view, and no relay buttons.
+
+Routing: the task records `sourceConversationUrl` (origin + path of the ChatGPT conversation visible at send time) and belongs to one Workspace, whose own ChatGPT view receives the result. Before inserting, `ChatGPTAdapter.ensureConversation` checks that the view shows that exact conversation, navigates back to it if the user moved elsewhere in the Workspace, and fails (nothing inserted) if the source is unknown, cannot be opened or ChatGPT lands elsewhere. It never posts into whatever is visible, and other Workspaces are never touched. While ChatGPT is replying, or the message box holds a draft, delivery waits (about 3 min at most) and never overwrites a draft; then it fails with Retry. A delivery interrupted by quitting becomes "failed" on the next start.
+
+Reason:
+The product experience is "ChatGPT plans, Claude works in the background, ChatGPT reviews". A click after every managed run defeated it, while the explicit send intent on the way out keeps control where it matters. Strict conversation identity prevents a result from landing in the wrong project or conversation.

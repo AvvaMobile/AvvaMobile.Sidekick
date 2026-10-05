@@ -59,13 +59,11 @@ When the turn ends, Sidekick records:
 - diff stat
 - relevant test/build evidence when available
 
-### Step 7: Offer ChatGPT review
+### Step 7: Automatic ChatGPT review (D044)
 
-Sidekick creates and persists a bounded review packet, marks it review_pending, notifies the user and enables the *Send to ChatGPT* button on the divider.
+When a managed task succeeds, Sidekick creates and persists a bounded review packet and, without a click, inserts and submits it into the ChatGPT conversation the task came from (the conversation recorded when the task was sent, in that Workspace). If the user moved to another conversation meanwhile, Sidekick navigates back to the source one first; if that is impossible it does not guess.
 
-When the user clicks it, Sidekick inserts and submits the packet into that Workspace's ChatGPT conversation.
-
-If the user does not approve yet, the packet remains locally recoverable and Claude is not rerun.
+Manual Claude turns (typed in the terminal) are not managed tasks and are never handed back. If delivery fails, the packet is kept and a compact Retry appears; Claude is never rerun.
 
 The packet asks ChatGPT to review the implementation critically.
 
@@ -133,15 +131,13 @@ If later versions introduce permission automation, that is a separate security d
 
 ## 6. Review handback behavior
 
-When Claude's turn ends, Sidekick builds the review packet and notifies the user, but does not submit it to ChatGPT until the user clicks *Send to ChatGPT*.
+When a managed task succeeds, Sidekick builds the review packet and delivers it to the originating ChatGPT conversation automatically (D044). It waits while ChatGPT is replying or a draft is in the message box, and never overwrites a draft. There is no *Send to ChatGPT* button.
 
-On that click, Sidekick attempts the handback.
-
-If ChatGPT cannot accept the packet:
+If ChatGPT cannot accept the packet (conversation unavailable, page not ready, insertion failed):
 
 - keep task review_pending
 - retain the packet
-- show Retry review
+- show "Result delivery failed" with a compact Retry (the only manual action)
 - do not rerun Claude
 
 ## 7. Cancellation
@@ -185,7 +181,7 @@ Activating that notification selects the Workspace instantly.
 
 ## 10. Separate windows
 
-Right-click a tab → *Move to New Window* moves that Workspace into its own window (*Move to Main Window* moves it back). Moving is a visibility change only: the ChatGPT view, terminal Claude and task state are kept. Each window has its own active tab, split and relay buttons.
+Right-click a tab → *Move to New Window* moves that Workspace into its own window (*Move to Main Window* moves it back). Moving is a visibility change only: the ChatGPT view, terminal Claude and task state are kept. Each window has its own active tab and split.
 
 ## 11. Manual use of the same Claude
 

@@ -16,13 +16,13 @@ You decide every handoff. Nothing moves between ChatGPT and Claude unless you as
  │ 2. ChatGPT writes a prompt for Claude.│──▶│ 3. Send to Claude: the prompt is    │
  │                                       │   │    pasted into Claude Code, which   │
  │                                       │   │    works in your project folder.    │
- │ 5. ChatGPT reviews the result and you │◀──│ 4. Send to ChatGPT: Claude's result │
- │    decide what happens next.          │   │    and a Git summary go back.       │
+ │ 5. ChatGPT reviews the result and you │◀──│ 4. Claude's result and a Git summary│
+ │    decide what happens next.          │   │    return automatically.            │
  └───────────────────────────────────────┘   └─────────────────────────────────────┘
 ```
 
 - **Projects as tabs.** Each project has its own ChatGPT conversation, its own Claude Code session and its own folder. Switching tabs never mixes their context.
-- **One-click handoffs.** Two round buttons on the divider: *Send to Claude* lights up when ChatGPT has written a Claude prompt; *Send to ChatGPT* appears when Claude has finished.
+- **Hands-off handoffs.** Tell ChatGPT "send this to Claude" (or use *Send to Claude*); when Claude finishes, its result returns to the same ChatGPT conversation automatically. Three views per project: ChatGPT Focus, Split, Claude Focus.
 - **Your Claude Code, unchanged.** The right-hand pane is the real interactive `claude` terminal with your own settings, model, permissions and status line. You can type into it as usual.
 - **Notifications.** A badge, toast and system notification tell you when Claude finishes in a project you are not looking at.
 - **Voice-friendly.** ChatGPT's voice mode works inside the app. Saying "send this to Claude" in your own message lets Sidekick send the next prompt after a 3-second countdown you can cancel (can be turned off in Settings).
@@ -69,14 +69,14 @@ You can reopen this window any time from **Help → Setup Checklist…**.
 
 ### What is sent back to ChatGPT, and when
 
-Only when you click **Send to ChatGPT**, Sidekick posts a bounded review message into that project's ChatGPT conversation. It contains:
+When a Claude task that Sidekick started finishes successfully, Sidekick posts a bounded review message into that project's ChatGPT conversation. It contains:
 
 - an excerpt of the prompt and Claude's final answer,
 - the Git branch, changed file names, diff statistics and a size-limited diff excerpt.
 
 Files that look like secrets are left out of the diff: `.env` files, keys and certificates (`*.pem`, `*.key`, `*.p12`, `*.pfx`, SSH keys), anything named `*secret*` or `*credential*`, and lock files. The full Claude transcript is never sent.
 
-Keep in mind that the diff excerpt is your source code going to ChatGPT. If a project's code must not leave your machine, do not use *Send to ChatGPT* for it.
+Keep in mind that the diff excerpt is your source code going to ChatGPT. If a project's code must not leave your machine, do not send tasks to Claude through Sidekick for it. Your own typing in the Claude terminal is never sent to ChatGPT.
 
 ### Your accounts and credentials
 

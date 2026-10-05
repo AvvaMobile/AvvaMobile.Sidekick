@@ -10,7 +10,7 @@ Sidekick will:
 
 - embed ChatGPT as a remote, isolated web surface with the user's normal login and voice mode;
 - run the user's own interactive Claude Code in the Workspace's project folder;
-- move a prompt from ChatGPT to Claude, and a bounded review packet back, only on an explicit user action (D005, D008, D034);
+- move a prompt from ChatGPT to Claude, and a bounded review packet back, automatically for managed tasks (explicit send intent out, D005, D034; automatic handback in, D044);
 - keep several Workspaces alive at once and switch between them without reloading anything.
 
 Sidekick will not reimplement ChatGPT or Claude Code, store ChatGPT or Anthropic credentials, forward the whole conversation to Claude, give remote content filesystem/shell/Node access, perform destructive Git actions, or use screen-coordinate automation. A Claude success message is not proof that the repository is correct; that is what the ChatGPT review is for.
@@ -18,7 +18,7 @@ Sidekick will not reimplement ChatGPT or Claude Code, store ChatGPT or Anthropic
 ## 1. High-level component model
 
 - Electron main process
-- local shell renderer (React) and a small local relay overlay renderer
+- local shell renderer (React)
 - one ChatGPT WebContentsView per Workspace
 - ChatGPT adapter
 - Workspace orchestrator and handoff controller
@@ -39,8 +39,7 @@ User (voice or text)
   -> Claude works in the project folder
   -> Claude Stop hook -> StopHookChannel -> task completes with Claude's last answer
   -> Git Evidence Service -> Review Packet (review_pending)
-  -> user clicks Send to ChatGPT
-  -> ChatGPT Adapter inserts and submits the packet
+  -> automatic handback (D044): ChatGPT Adapter restores the source conversation, inserts and submits the packet
   -> ChatGPT review -> user
 ```
 
@@ -52,7 +51,7 @@ Owns all privileged capabilities: path validation, child processes, PTYs, Git, p
 
 ### Local renderers
 
-The shell renderer and the relay overlay are packaged application code. They request narrow operations through preload IPC (open project picker, send to Claude, cancel, send review, terminal input/resize, …). There is no generic execute-shell API.
+The shell renderer is packaged application code. They request narrow operations through preload IPC (open project picker, send to Claude, cancel, retry a failed review delivery, terminal input/resize, …). There is no generic execute-shell API.
 
 ### ChatGPT remote view
 
@@ -61,9 +60,8 @@ Remote, untrusted content with no preload and no bridge. Sidekick interacts with
 ## 3. Shell composition
 
 - **Tab strip** (`src/renderer/shell/components/TabBar.tsx`, D038): one tab per open Workspace, browser-style, reorderable by dragging, with a running/finished/failed badge. `+` opens the Projects start page, which lists saved Workspaces. Closing a tab keeps the saved Workspace.
-- **Multiple windows** (`src/main/app/shellWindows.ts`, `ShellApp.ts`): right-click a tab → *Move to New Window* / *Move to Main Window*. Each open tab lives in exactly one window; each window has its own active tab, split layout and relay overlay. Runtimes (ChatGPT view, PTY, orchestrator) are shared and are never recreated by a move.
+- **Multiple windows** (`src/main/app/shellWindows.ts`, `ShellApp.ts`): right-click a tab → *Move to New Window* / *Move to Main Window*. Each open tab lives in exactly one window; each window has its own active tab and split layout. Runtimes (ChatGPT view, PTY, orchestrator) are shared and are never recreated by a move.
 - **Work area**: ChatGPT on the left, the development pane (terminal Claude) on the right, with a draggable divider.
-- **Relay overlay**: the two round buttons on the divider (*Send to Claude*, *Send to ChatGPT*) live in their own transparent local WebContentsView (`src/renderer/relay`, `src/preload/relay.ts`) so they can sit above the ChatGPT view. Clicks are accepted only from that window's relay view; the window's shell renderer performs the action for its active Workspace.
 
 Each Workspace owns one ChatGPT WebContentsView that stays alive while the app runs. Only the active tab's view is visible and sized into the left region; others are hidden, never navigated or destroyed.
 
@@ -129,10 +127,10 @@ PTY output and keystrokes never change task state; only hook events do.
 | Terminal | `src/main/terminal/PtyService.ts` (node-pty), `src/renderer/shell/terminals.ts` (xterm.js) |
 | Review packet | `src/domain/review/reviewPacket.ts` |
 | Auto-send detection | `src/domain/handoff/autoSend.ts` |
-| Shell UI | `src/renderer/shell/*` (React); relay overlay `src/renderer/relay/*` |
+| Shell UI | `src/renderer/shell/*` (React) |
 | Updates, setup check | `src/main/app/updater.ts`, `src/main/app/setupCheck.ts` |
 
-The right-hand pane is the Workspace's terminal running Claude (xterm.js on node-pty). Its header has **Clear** (`/clear`: the Claude context; disabled while a task runs, because it would be queued into that turn), **Copy** (copies the code of Claude's last completed response from the Stop hook's `last_assistant_message`, never terminal text and never `/copy`: one fenced block → its body; several → a menu; none → the full response; ▾ = full response; D040), the model switch and effort level (usable while a task runs: they apply from the next turn, D041), **Stop** only while a managed task is active, and **⋯** (*New Claude session*). A sub-header shows the project path and Claude session. The relay buttons sit on the divider, not in the header; only the auto-send countdown is shown in the pane (review handback is the relay button).
+The right-hand pane is the Workspace's terminal running Claude (xterm.js on node-pty). Its header has **Clear** (`/clear`: the Claude context; disabled while a task runs, because it would be queued into that turn), **Copy** (copies the code of Claude's last completed response from the Stop hook's `last_assistant_message`, never terminal text and never `/copy`: one fenced block → its body; several → a menu; none → the full response; ▾ = full response; D040), the model switch and effort level (usable while a task runs: they apply from the next turn, D041), **Stop** only while a managed task is active, and **⋯** (*New Claude session*). A sub-header shows the project path and Claude session. There are no relay buttons (D044); only the auto-send countdown is shown in the pane (review handback is the relay button).
 
 Managed activity is not rendered into the terminal: only Claude itself writes there (rendering into it would corrupt Claude's screen).
 
@@ -152,11 +150,10 @@ On task completion:
 2. collect Git evidence
 3. create and persist the ReviewPacket, mark `review_pending`
 4. notify the user
-5. wait for the user's click on *Send to ChatGPT*
-6. insert and submit the packet into that Workspace's ChatGPT conversation
-7. mark `review_sent`
+5. (succeeded managed tasks only) restore the source conversation (`ChatGPTAdapter.ensureConversation`), then insert and submit the packet there, waiting while ChatGPT is replying or holds a draft
+6. mark `review_sent`
 
-If sending fails, the task stays `review_pending` and can be retried without rerunning Claude.
+If delivery fails, the task stays `review_pending`, the Workspace shows "Result delivery failed" and Retry re-delivers the stored packet without rerunning Claude. Manual terminal turns are never handed back (D044).
 
 ## 12. Git evidence service
 
