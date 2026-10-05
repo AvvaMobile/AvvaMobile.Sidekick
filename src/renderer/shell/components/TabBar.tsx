@@ -14,13 +14,20 @@ const PRESET_TITLES: Record<(typeof PRESET_MODES)[number], string> = {
 const ICON_SPLIT: Record<(typeof PRESET_MODES)[number], number> = { 'gpt-hidden': 0, 'split-20-80': 0.2, 'split-50-50': 0.5, 'split-80-20': 0.8, 'terminal-hidden': 1 };
 
 function LayoutIcon({ mode }: { mode: (typeof PRESET_MODES)[number] }) {
-  const inner = 12;
-  const left = Math.round(inner * ICON_SPLIT[mode]);
+  // A tiny window: the two panes fill it edge to edge (no inner padding).
+  const body = 16;
+  const left = Math.round(body * ICON_SPLIT[mode]);
+  const clip = `layout-icon-${mode}`;
   return (
     <svg width="18" height="14" viewBox="0 0 18 14" aria-hidden="true">
-      <rect x="0.5" y="0.5" width="17" height="13" rx="2" fill="none" stroke="currentColor" opacity=".55" />
-      {left > 0 && <rect x="3" y="3" width={left} height="8" rx="1" fill="currentColor" opacity=".35" />}
-      {left < inner && <rect x={3 + left} y="3" width={inner - left} height="8" rx="1" fill="currentColor" />}
+      <clipPath id={clip}>
+        <rect x="0.5" y="0.5" width="17" height="13" rx="2" />
+      </clipPath>
+      <g clipPath={`url(#${clip})`}>
+        {left > 0 && <rect x="1" y="1" width={left} height="12" fill="#f7f7f8" />}
+        {left < body && <rect x={1 + left} y="1" width={body - left} height="12" fill="currentColor" />}
+      </g>
+      <rect x="0.5" y="0.5" width="17" height="13" rx="2" fill="none" stroke="currentColor" opacity=".6" />
     </svg>
   );
 }

@@ -250,7 +250,7 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .coffee-modal .modal-actions { justify-content: center; }
 
 /* Layout presets: one shared group at the far right of the tab strip, for the active Workspace. */
-.layout-presets { flex: none; align-self: center; display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: #dcdcdf; }
+.layout-presets { flex: none; align-self: center; display: flex; gap: 2px; padding: 2px; border: 1px solid #c4c4c8; border-radius: 8px; }
 .layout-btn { width: 28px; height: 24px; display: grid; place-items: center; border: none; border-radius: 6px; background: transparent; color: var(--chrome-muted); cursor: pointer; }
 .layout-btn:hover { color: var(--chrome-text); background: #e8e8ea; }
 .layout-btn.selected { background: var(--chrome-topbar); color: var(--accent); box-shadow: 0 0 0 1px var(--chrome-border); }
