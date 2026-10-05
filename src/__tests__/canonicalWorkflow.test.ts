@@ -31,4 +31,18 @@ describe('canonical workflow (D040)', () => {
     expect(preload).toContain("'review:retry'");
     expect(preload).not.toContain("'review:send'");
   });
+
+  it('exactly two send paths exist: the block button into Claude and the automatic handback into ChatGPT (D047)', () => {
+    for (const { p, text } of all) {
+      expect(text, p).not.toMatch(/diag:(insert|submit|state|home)|ResponseCopier|response:(copy|info)|copyResponse|developerMode|SIDEKICK_DEVELOPER/);
+    }
+    const users = (needle: string) =>
+      all.filter(({ p, text }) => text.includes(needle) && !p.endsWith('ChatGPTAdapter.ts')).map(({ p }) => p.replace(/^.*\/src\//, ''));
+    // The ChatGPT composer is written to only by the orchestrator's automatic handback.
+    expect(users('.insertComposerText(')).toEqual(['main/app/WorkspaceOrchestrator.ts']);
+    expect(users('.submitComposer(')).toEqual(['main/app/WorkspaceOrchestrator.ts']);
+    // The terminal's Claude receives a managed prompt only through the runner started by the block-button task.
+    const preload = readFileSync(join(__dirname, '../preload/shell.ts'), 'utf8');
+    expect(preload).not.toMatch(/diagnostics|insert|submit/i);
+  });
 });

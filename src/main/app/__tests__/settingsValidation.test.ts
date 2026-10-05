@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateAppSettingsPatch, validateProjectSettingsPatch } from '../settingsValidation';
+import { validateProjectSettingsPatch } from '../settingsValidation';
 
 const dirs = new Set(['/Users/x/proj', '/Users/x/other']);
 const isDir = (p: string) => dirs.has(p);
@@ -55,20 +55,5 @@ describe('validateProjectSettingsPatch', () => {
   it('validates every field of a combined patch', () => {
     expect(v({ name: 'B', color: '#112233', model: 'opus' })).toEqual({ ok: true, patch: { name: 'B', color: '#112233', model: 'opus' } });
     expect(v({ name: 'B', color: 'nope' }).ok).toBe(false);
-  });
-});
-
-describe('validateAppSettingsPatch', () => {
-  it('accepts a boolean for developerMode', () => {
-    expect(validateAppSettingsPatch({ developerMode: true })).toEqual({ ok: true, patch: { developerMode: true } });
-  });
-
-  it('rejects empty, unknown and non-boolean values', () => {
-    expect(validateAppSettingsPatch({}).ok).toBe(false);
-    expect(validateAppSettingsPatch(null).ok).toBe(false);
-    expect(validateAppSettingsPatch({ defaultModel: 'opus' }).ok).toBe(false);
-    expect(validateAppSettingsPatch({ developerMode: 'yes' }).ok).toBe(false);
-    expect(validateAppSettingsPatch({ autoSendOnRequest: true }).ok).toBe(false);
-    expect(validateAppSettingsPatch({ claudePromptSuffix: 'x' }).ok).toBe(false);
   });
 });

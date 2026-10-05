@@ -27,7 +27,6 @@ describe('composer and submit scripts', () => {
     const s = pageStateScript(SELECTORS);
     expect(s.composerFound).toBe(true);
     expect(s.generating).toBe(true);
-    expect(s.assistantMessageCount).toBe(1);
   });
 
   it('refuses to insert over a user draft unless allowed', () => {
@@ -91,7 +90,6 @@ describe('2026 logged-in ChatGPT UI', () => {
     const r = focusComposerScript({ sel: SELECTORS, requireEmpty: true });
     expect(r).toMatchObject({ ok: true, kind: 'contenteditable' });
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Ask ChatGPT');
-    expect(pageStateScript(SELECTORS).assistantMessageCount).toBe(1);
   });
 
   it('clicks the new-UI Send button', () => {

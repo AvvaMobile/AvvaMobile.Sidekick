@@ -39,8 +39,6 @@ function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
   };
 }
 
-const DIAG_LABELS = ['Page state', 'Capture Claude Prompt', 'Latest user msg', 'Mic status', 'Home', 'Insert into composer', 'Submit'];
-
 const actions = () => ({
   cancelTask: vi.fn(),
   resetSession: vi.fn(),
@@ -49,10 +47,7 @@ const actions = () => ({
   setModel: vi.fn(),
   setEffort: vi.fn(),
   clearTerminal: vi.fn(),
-  responseInfo: vi.fn(async () => ({ available: true, blocks: [] })),
-  copyResponse: vi.fn<DevPaneActions['copyResponse']>(async () => ({ ok: true })),
 });
-const diag = { state: vi.fn(), capture: vi.fn(), latestUser: vi.fn(), micStatus: vi.fn(), home: vi.fn(), submit: vi.fn(), insert: vi.fn() };
 
 describe('development pane UI', () => {
   let root: Root;
@@ -67,8 +62,8 @@ describe('development pane UI', () => {
     host.remove();
   });
 
-  const render = (list: WorkspaceView[], activeId: string, debugMode = false, a = actions()) => {
-    act(() => root.render(<DevPane workspaces={list} active={list.find((w) => w.id === activeId)!} debugMode={debugMode} actions={a} diagnostics={diag} />));
+  const render = (list: WorkspaceView[], activeId: string, a = actions()) => {
+    act(() => root.render(<DevPane workspaces={list} active={list.find((w) => w.id === activeId)!} actions={a} />));
     return a;
   };
   const buttonLabels = () => Array.from(host.querySelectorAll('button')).map((b) => b.textContent?.trim());
@@ -100,7 +95,7 @@ describe('development pane UI', () => {
     expect(a.setEffort).toHaveBeenLastCalledWith('a', null);
   });
 
-  it('while a task runs only STOP reflects it: model, effort and Copy stay usable', () => {
+  it('while a task runs only STOP reflects it: model and effort stay usable', () => {
     const a = render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
     expect(buttonLabels()).toContain('Stop');
     expect((host.querySelector('select.effort-select') as HTMLSelectElement).disabled).toBe(false);
@@ -108,7 +103,6 @@ describe('development pane UI', () => {
     expect(byText('Sonnet').disabled).toBe(false);
     act(() => byText('Sonnet').click());
     expect(a.setModel).toHaveBeenCalledWith('a', 'sonnet'); // applied to the next turn by the main process
-    expect(byText('Copy').disabled).toBe(false);
   });
 
   it('STOP is not shown once the task is no longer active', () => {
@@ -127,45 +121,6 @@ describe('development pane UI', () => {
     expect(clear().disabled).toBe(true);
   });
 
-  it('Copy copies the last response through the app (never /copy in the terminal), even while a task runs', () => {
-    const a = render([ws('a', { task: { status: 'running' } as WorkspaceView['task'] })], 'a');
-    act(() => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Copy') as HTMLButtonElement).click());
-    expect(a.copyResponse).toHaveBeenCalledWith('a', 'auto');
-    expect(a).not.toHaveProperty('copyTerminal');
-  });
-
-  it('several code blocks open a selection menu; picking one copies that block, "Full response" copies all', async () => {
-    const a = render([ws('a')], 'a');
-    a.copyResponse.mockResolvedValueOnce({ ok: false, blocks: [{ language: 'bash', preview: 'ls' }, { language: null, preview: 'x' }] });
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Copy') as HTMLButtonElement).click());
-    expect(buttonLabels()).toEqual(expect.arrayContaining(['Code block 1 — bash', 'Code block 2', 'Full response']));
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Code block 2') as HTMLButtonElement).click());
-    expect(a.copyResponse).toHaveBeenLastCalledWith('a', { block: 1 });
-    expect(buttonLabels()).not.toContain('Full response');
-  });
-
-  it('the ▾ option copies the full response when there is a single block', async () => {
-    const a = render([ws('a')], 'a');
-    await act(async () => (host.querySelector('button[aria-label="More copy options"]') as HTMLButtonElement).click());
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Copy full response') as HTMLButtonElement).click());
-    expect(a.copyResponse).toHaveBeenLastCalledWith('a', 'full');
-  });
-
-  it('debug controls are hidden in normal mode', () => {
-    render([ws('a')], 'a', false);
-    for (const l of DIAG_LABELS) expect(buttonLabels()).not.toContain(l);
-    expect(host.querySelector('[data-testid="diagnostics"]')).toBeNull();
-    expect(buttonLabels()).not.toContain('Diagnostics');
-  });
-
-  it('debug controls are reachable only when Developer → Diagnostics is on', () => {
-    render([ws('a')], 'a', true);
-    const tab = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Diagnostics')!;
-    act(() => tab.click());
-    expect(host.querySelector('[data-testid="diagnostics"]')).not.toBeNull();
-    expect(buttonLabels()).toContain('Page state');
-  });
-
   it('the terminal is the pane (no preview dialog)', () => {
     render([ws('a')], 'a');
     expect(host.querySelector('[role="dialog"]')).toBeNull();
@@ -174,7 +129,7 @@ describe('development pane UI', () => {
     expect(buttonLabels()).not.toContain('Claude');
   });
 
-  it('shows no review bar in the pane (review handback lives on the relay button)', () => {
+  it('shows no review bar while the delivery is pending or sent (only a failed delivery shows Retry)', () => {
     const task = {
       id: 't1',
       status: 'review_pending' as const,

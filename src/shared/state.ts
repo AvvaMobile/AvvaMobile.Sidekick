@@ -79,7 +79,6 @@ export interface ShellState {
   /** All saved Workspaces, most recently opened first. */
   projects: ProjectEntry[];
   activeWorkspaceId: string | null;
-  debugMode: boolean;
 }
 
 export interface ToastMessage {

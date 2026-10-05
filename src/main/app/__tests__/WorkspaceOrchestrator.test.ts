@@ -349,15 +349,6 @@ describe('WorkspaceOrchestrator', () => {
     expect(chats.a!.inserted).toHaveLength(0);
   });
 
-  it("the user's own (manual) Claude turns are never handed back to ChatGPT", async () => {
-    orch.observeClaudeStop('a');
-    orch.observeClaudeStop('a');
-    await flush();
-    expect(chats.a!.inserted).toHaveLength(0);
-    expect(chats.a!.submitted).toBe(0);
-    expect(orch.view('a')!.task).toBeNull();
-  });
-
   it('a delivery cut short by quitting the app is kept as failed so Retry appears after the restart', async () => {
     const req = await startTask('a');
     complete(req, 'Result A');

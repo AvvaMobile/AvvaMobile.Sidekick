@@ -129,11 +129,11 @@ PTY output and keystrokes never change task state; only hook events do.
 | Shell UI | `src/renderer/shell/*` (React) |
 | Updates, setup check | `src/main/app/updater.ts`, `src/main/app/setupCheck.ts` |
 
-The right-hand pane is the Workspace's terminal running Claude (xterm.js on node-pty). Its header has **Clear** (`/clear`: the Claude context; disabled while a task runs, because it would be queued into that turn), **Copy** (copies the code of Claude's last completed response from the Stop hook's `last_assistant_message`, never terminal text and never `/copy`: one fenced block → its body; several → a menu; none → the full response; ▾ = full response; D040), the model switch and effort level (usable while a task runs: they apply from the next turn, D041), **Stop** only while a managed task is active, and **⋯** (*New Claude session*). A sub-header shows the project path and Claude session. There are no relay buttons (D044); only the auto-send countdown is shown in the pane (review handback is the relay button).
+The right-hand pane is the Workspace's terminal running Claude (xterm.js on node-pty). Its header has **Clear** (`/clear`: the Claude context; disabled while a task runs, because it would be queued into that turn), the model switch and effort level (usable while a task runs: they apply from the next turn, D041), **Stop** only while a managed task is active, and **⋯** (*New Claude session*). A sub-header shows the project path and Claude session, and a failed result delivery shows a compact Retry (D044).
 
 Managed activity is not rendered into the terminal: only Claude itself writes there (rendering into it would corrupt Claude's screen).
 
-Isolation (D022): ChatGPT activity never writes to the terminal, sends input to a PTY, starts Claude or changes task state. ChatGPT/adapter/IPC/navigation/permission diagnostics go to the diagnostics log, never to a renderer surface. ChatGPT-side modules must not import the development pane, PTY, terminal or orchestration modules (enforced by `src/__tests__/isolationBoundaries.test.ts`). The only ChatGPT → Claude path is `HandoffController.sendToClaude()`.
+Isolation (D022): ChatGPT activity never writes to the terminal, sends input to a PTY, starts Claude or changes task state. ChatGPT/adapter/navigation/permission events go to the diagnostics log file, never to a renderer surface. ChatGPT-side modules must not import the development pane, PTY, terminal or orchestration modules (enforced by `src/__tests__/isolationBoundaries.test.ts`). The only ChatGPT → Claude path is the click on a block's own *Send to Claude* button (`WorkspaceOrchestrator.sendBlockToClaude`); the only Claude → ChatGPT path is the automatic handback of that managed task (D044, D047).
 
 ## 11. Orchestrator state machine
 
@@ -209,4 +209,4 @@ Settings are minimal; the user never configures what Sidekick can detect. No pas
 
 - Claude executable is resolved automatically (login-shell `PATH`); `SIDEKICK_CLAUDE_PATH` overrides it.
 - Approved ChatGPT/OpenAI origins live only in `src/main/security/origins.ts`, with tests.
-- Environment variables: `SIDEKICK_USER_DATA`, `SIDEKICK_DEVELOPER` (Developer menu), `SIDEKICK_NO_UPDATES`, `SIDEKICK_CLAUDE_PATH`, `SIDEKICK_DIAG_CONSOLE` (diagnostics to stdout). Older `WORKSPACE_*` names still work.
+- Environment variables: `SIDEKICK_USER_DATA`, `SIDEKICK_NO_UPDATES`, `SIDEKICK_CLAUDE_PATH`, `SIDEKICK_DIAG_CONSOLE` (diagnostics log to stdout). Older `WORKSPACE_*` names still work.

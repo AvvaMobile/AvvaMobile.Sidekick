@@ -1,7 +1,6 @@
 import {
   app,
   BrowserWindow,
-  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -30,12 +29,11 @@ import type { AppSettings, ProjectSettings, SettingsTarget } from '../../shared/
 import { isSetupLink, SETUP_LINKS, type SetupCheck } from '../../shared/setup';
 import { TOPBAR_HEIGHT, workAreaFor } from '../../shared/shellLayout';
 import { BUY_ME_A_COFFEE_URL, SHELL_CHANNELS, type ProjectEntry, type ShellCommand, type ShellState, type ToastMessage } from '../../shared/state';
-import { ChatGPTAdapter, MAX_PROMPT_CHARS } from '../chatgpt/ChatGPTAdapter';
+import { ChatGPTAdapter } from '../chatgpt/ChatGPTAdapter';
 import { InteractiveClaudeRunner } from '../claude/InteractiveClaudeRunner';
 import { isClaudeSessionId, launchCommand, loginShellEnv, resolveClaudeExecutable } from '../claude/ClaudeRunner';
 import { StopHookChannel, hookSettings } from '../claude/StopHookChannel';
 import { DeferredRelaunch } from './DeferredRelaunch';
-import { ResponseCopier } from './ResponseCopier';
 import { DevelopmentPaneRegistry } from '../development/DevelopmentPane';
 import { createDiagnosticsLog } from '../diagnostics/diagnosticsLog';
 import { GitEvidence } from '../git/GitEvidence';
@@ -44,7 +42,7 @@ import { createChatGptView, redactUrl, redactUrlsIn } from '../security/remoteCo
 import { PtyService } from '../terminal/PtyService';
 import { SplitLayoutController } from '../workspace/SplitLayoutController';
 import { AppStateStore } from './AppStateStore';
-import { validateAppSettingsPatch, validateProjectSettingsPatch } from './settingsValidation';
+import { validateProjectSettingsPatch } from './settingsValidation';
 import { isSamePage, mergeWindowOrder, nextActiveTab, stateForWindow } from './shellWindows';
 import { prefillGithubRepository } from '../github/gitRemote';
 import { defaultGithubToken, setGithubRepository, verifyWorkspaceGithub } from '../github/GithubAccessChecker';
@@ -72,7 +70,6 @@ const BLOCK_SEND_POLL_MS = 250;
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 
-const isCopyBlock = (v: unknown): v is { block: number } => typeof v === 'object' && v !== null && typeof (v as { block?: unknown }).block === 'number';
 const isId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(v);
 
 /**
@@ -85,13 +82,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   const store = new AppStateStore(join(userData, 'workspace-state.json'));
   const panes = new DevelopmentPaneRegistry();
   const stopHooks = new StopHookChannel(join(userData, 'hook-events'));
-  const responses = new ResponseCopier(clipboard, (p) => {
-    try {
-      return readFileSync(p, 'utf8');
-    } catch {
-      return null;
-    }
-  });
   const icons = new WorkspaceIcons(join(userData, 'icons'));
   const chats = new Map<string, ChatRuntime>();
   let defaultModel: ModelChoice | null = null;
@@ -100,12 +90,10 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   } catch {
     // no user settings: Claude Code's built-in default applies
   }
-  // Developer → Diagnostics; SIDEKICK_DEVELOPER=1 (or WORKSPACE_DEVELOPER=1) starts with it enabled (development only).
-  let debugMode = process.env.SIDEKICK_DEVELOPER === '1' || process.env.WORKSPACE_DEVELOPER === '1';
 
   // ---------- Windows ----------
   // Every open tab lives in exactly one shell window; the first window is the main window. Each window has
-  // its own split layout (active tab) and relay overlay; runtimes (ChatGPT view, PTY, orchestrator) are shared.
+  // its own split layout (active tab); runtimes (ChatGPT view, PTY, orchestrator) are shared.
 
   const windows = new Map<number, ShellWindow>();
   const windowOf = new Map<string, ShellWindow>();
@@ -321,7 +309,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     const projects: ProjectEntry[] = [...store.get().workspaces]
       .sort((a, b) => (b.lastOpenedAt ?? '').localeCompare(a.lastOpenedAt ?? '') || a.name.localeCompare(b.name))
       .map((w) => ({ id: w.id, name: w.name, projectPath: w.projectPath, open: isOpen(w) }));
-    return { workspaces, projects, activeWorkspaceId: mainWindow().layout.activeWorkspaceId, debugMode };
+    return { workspaces, projects, activeWorkspaceId: mainWindow().layout.activeWorkspaceId };
   }
 
   /** What one window's renderer sees: its own tabs and active tab; the Projects list is shared. */
@@ -360,8 +348,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     orchestrator.register(w.id);
     // The user's own Claude turns (typed in the terminal) also end the flow's Claude side.
     stopHooks.onStop(w.id, (e) => {
-      responses.record(w.id, e);
-      orchestrator.observeClaudeStop(w.id);
       relaunches.settled(w.id);
     });
     const view = createChatGptView(
@@ -412,7 +398,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     orchestrator.unregister(id);
     pty.stop(id);
     stopHooks.close(id);
-    responses.forget(id);
     relaunches.forget(id);
     if (c) {
       if (sw && !sw.win.isDestroyed()) sw.win.contentView.removeChildView(c.view);
@@ -846,12 +831,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   });
   handle('task:cancel', (id) => (known(id) ? orchestrator.cancelTask(id) : { ok: false }));
   handle('session:reset', (id) => (known(id) ? orchestrator.resetSession(id) : { ok: false }));
-  // Copy of Claude's last response: clipboard only, never touches the PTY, the session or a running task.
-  handle('response:info', (id) => (known(id) ? responses.info(id) : { available: false, blocks: [] }));
-  handle('response:copy', (id, target) => {
-    const t = target === 'auto' || target === 'full' ? target : isCopyBlock(target) ? { block: target.block } : null;
-    return known(id) && t ? responses.copy(id, t) : { ok: false, code: 'invalid', detail: '' };
-  });
   handle('review:retry', (id, taskId) => (known(id) && isId(taskId) ? orchestrator.retryReview(id, taskId) : { ok: false, code: 'invalid', detail: '' }));
   handle('terminal:restart', (id) => {
     if (known(id)) pty.restart(id);
@@ -888,44 +867,14 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     broadcast();
   });
 
-  // Developer-only adapter diagnostics (D025): refused unless Developer → Diagnostics is enabled.
-  const diagHandle = (channel: string, fn: (c: ChatRuntime, arg: unknown) => unknown) =>
-    handleIn(channel, (sw, arg) => {
-      const id = sw.layout.activeWorkspaceId;
-      const c = id ? chats.get(id) : undefined;
-      if (!debugMode) return { ok: false, code: 'debug_disabled' };
-      if (!c) return { ok: false, code: 'no_workspace' };
-      return fn(c, arg);
-    });
-  diagHandle('diag:state', (c) => c.adapter.getPageState());
-  diagHandle('diag:mic-status', () => ({ microphone: systemPreferences.getMediaAccessStatus('microphone') }));
-  diagHandle('diag:home', (c) => c.view.webContents.loadURL(CHATGPT_HOME_URL).then(() => ({ ok: true })));
-  diagHandle('diag:insert', (c, arg) =>
-    typeof arg === 'string' && arg.length > 0 && arg.length <= MAX_PROMPT_CHARS ? c.adapter.insertComposerText(arg) : { ok: false, code: 'invalid_input' },
-  );
-  diagHandle('diag:submit', (c) => c.adapter.submitComposer());
-
   // ---------- App Settings (app menu → Settings…) ----------
 
   const appSettings = (): AppSettings => ({
-    developerMode: debugMode,
     defaultModel,
     version: app.getVersion(),
     userDataPath: userData,
   });
-  // Mirrored by a menu checkbox; every window gets the change through the state push.
-  const setDebugMode = (on: boolean) => {
-    debugMode = on;
-    buildMenu();
-    broadcast();
-  };
   handle('app:get-settings', () => appSettings());
-  handle('app:update-settings', (raw) => {
-    const v = validateAppSettingsPatch(raw);
-    if (!v.ok) return { ok: false, code: 'invalid', detail: v.detail };
-    if (v.patch.developerMode !== undefined) setDebugMode(v.patch.developerMode);
-    return { ok: true, settings: appSettings() };
-  });
   handle('app:reveal-user-data', () => shell.showItemInFolder(join(userData, 'workspace-state.json')));
   handle('app:open-coffee', () => shell.openExternal(BUY_ME_A_COFFEE_URL));
 
@@ -1003,12 +952,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       {
         label: 'Developer',
         submenu: [
-          {
-            label: 'Diagnostics',
-            type: 'checkbox',
-            checked: debugMode,
-            click: (item) => setDebugMode(item.checked),
-          },
           { label: 'Shell DevTools', click: () => focusedWindow().win.webContents.openDevTools({ mode: 'detach' }) },
           {
             label: 'ChatGPT DevTools (active Workspace)',

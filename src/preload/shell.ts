@@ -45,14 +45,10 @@ contextBridge.exposeInMainWorld('workspace', {
   verifyGithub: (id: string) => ipcRenderer.invoke('workspace:verify-github', str(id)),
   chooseIcon: (id: string) => ipcRenderer.invoke('workspace:choose-icon', str(id)),
   getAppSettings: () => ipcRenderer.invoke('app:get-settings'),
-  updateAppSettings: (patch: unknown) => ipcRenderer.invoke('app:update-settings', patch && typeof patch === 'object' ? patch : {}),
   revealUserData: () => ipcRenderer.invoke('app:reveal-user-data'),
 
   cancelTask: (id: string) => ipcRenderer.invoke('task:cancel', str(id)),
   resetSession: (id: string) => ipcRenderer.invoke('session:reset', str(id)),
-  responseInfo: (id: string) => ipcRenderer.invoke('response:info', str(id)),
-  // target: 'auto' | 'full' | { block: n }; validated in the main process.
-  copyResponse: (id: string, target: unknown) => ipcRenderer.invoke('response:copy', str(id), target),
   retryReview: (id: string, taskId: string) => ipcRenderer.invoke('review:retry', str(id), str(taskId)),
 
   terminalInput: (id: string, data: string) => ipcRenderer.send('terminal:input', { workspaceId: str(id), data: str(data) }),
@@ -65,14 +61,6 @@ contextBridge.exposeInMainWorld('workspace', {
   requestMicrophone: () => ipcRenderer.invoke('app:request-microphone'),
   setSplit: (id: string, ratio: number, commit: boolean) => ipcRenderer.send('layout:set-split', { workspaceId: str(id), ratio: Number(ratio), commit: commit === true }),
   setViewMode: (id: string, mode: string) => ipcRenderer.send('layout:set-view', { workspaceId: str(id), mode: str(mode) }),
-
-  diagnostics: {
-    state: () => ipcRenderer.invoke('diag:state'),
-    micStatus: () => ipcRenderer.invoke('diag:mic-status'),
-    home: () => ipcRenderer.invoke('diag:home'),
-    insert: (text: string) => ipcRenderer.invoke('diag:insert', str(text)),
-    submit: () => ipcRenderer.invoke('diag:submit'),
-  },
 
   onState: (cb: (s: unknown) => void) => subscribe(PUSH.state, cb),
   onTerminalData: (cb: (e: unknown) => void) => subscribe(PUSH.terminalData, cb),

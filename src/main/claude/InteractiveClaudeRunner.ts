@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { sanitizeTerminalPrompt } from '../../domain/handoff/promptText';
+import { sanitizeTerminalPrompt } from '../../domain/prompt/promptText';
 import type { ClaudeRunHandle, ClaudeRunRequest, ClaudeRunnerPort } from './ClaudeRunner';
 import { lastAssistantText, type PromptSubmitEvent, type StopEvent } from './StopHookChannel';
 

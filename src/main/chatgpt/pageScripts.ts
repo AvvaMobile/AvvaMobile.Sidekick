@@ -12,12 +12,10 @@
 export interface PageSelectors {
   assistantMessage: string;
   incompleteAssistant: string;
-  userMessage: string;
   composer: string;
   sendButton: string;
   stopButton: string;
   loginButton: string;
-  voiceButton: string;
   /** ChatGPT "writing block" (rich, editable block rendered inside assistant messages). */
   writingBlock: string;
   /** 2026 UI fenced code block container (no <pre>); its header shows the language label. */
@@ -28,7 +26,6 @@ export interface PageSelectors {
 export const SELECTORS: PageSelectors = {
   // 2026 logged-in UI: turns are `[data-content-search-unit-key="…:assistant"]` (no role attributes).
   assistantMessage: '[data-message-author-role="assistant"], li[data-message-role="assistant"], [data-content-search-unit-key$=":assistant"]',
-  userMessage: '[data-message-author-role="user"], li[data-message-role="user"], [data-content-search-unit-key$=":user"]',
   /** An assistant turn that is still streaming (2026 "octane" UI marks finished turns with data-message-complete). */
   incompleteAssistant: 'li[data-message-role="assistant"]:not([data-message-complete])',
   // Writing blocks also contain a contenteditable ProseMirror; scripts exclude anything inside `writingBlock`.
@@ -39,47 +36,24 @@ export const SELECTORS: PageSelectors = {
   stopButton:
     'button[data-testid="stop-button"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop response"], form button[aria-label="Stop"]',
   loginButton: '[data-testid="login-button"], button[data-testid="welcome-login-button"], [aria-label$="Log in to use."]',
-  voiceButton:
-    'button[data-testid="composer-speech-button"], button[aria-label="Start voice mode"], button[aria-label*="voice mode" i], button[aria-label="Start Voice"]',
   writingBlock: '[data-oai-writing-block-surface], [data-testid="chatgpt-writing-block"]',
   codeBlock: '[data-markdown-copy="code-block"]',
 };
 
 export interface PageState {
-  url: string;
   composerFound: boolean;
   loggedOutMarkers: boolean;
+  /** ChatGPT is writing a reply (the handback waits for it). */
   generating: boolean;
-  assistantMessageCount: number;
-  userMessageCount: number;
-  voiceButtonFound: boolean;
-  /** Lightweight DOM fingerprint for compatibility diagnostics (counts only). */
-  fingerprint: Record<string, number>;
 }
 
 export function pageStateScript(sel: PageSelectors): PageState {
   const q = (s: string) => document.querySelectorAll(s).length;
   const composer = Array.from(document.querySelectorAll(sel.composer)).find((el) => !el.closest(sel.writingBlock));
   return {
-    url: location.href,
     composerFound: !!composer,
     loggedOutMarkers: q(sel.loginButton) > 0,
     generating: q(sel.stopButton) > 0 || q(sel.incompleteAssistant) > 0,
-    assistantMessageCount: q(sel.assistantMessage),
-    userMessageCount: q(sel.userMessage),
-    voiceButtonFound: q(sel.voiceButton) > 0,
-    fingerprint: {
-      'data-message-id': q('[data-message-id]'),
-      'data-message-role': q('[data-message-role]'),
-      'conversation-transcript': q('[data-conversation-transcript]'),
-      'conversation-turn': q('[data-testid^="conversation-turn-"]'),
-      pre: q('pre'),
-      'code[class*=language-]': q('code[class*="language-"]'),
-      prosemirror: q('.ProseMirror'),
-      'writing-block': q(sel.writingBlock),
-      'content-search-unit': q('[data-content-search-unit-key]'),
-      textarea: q('textarea'),
-    },
   };
 }
 

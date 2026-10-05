@@ -1,6 +1,5 @@
 import type { ViewMode } from '../../domain/layout/viewMode';
-import type { AppSettings, AppSettingsPatch, ProjectSettings, ProjectSettingsPatch, SettingsTarget } from '../../shared/settings';
-import type { BlockInfo, CopyKind, CopyTarget } from '../../shared/response';
+import type { AppSettings, ProjectSettings, ProjectSettingsPatch, SettingsTarget } from '../../shared/settings';
 import type { MicrophoneStatus, SetupCheck, SetupLink } from '../../shared/setup';
 import type { ShellCommand, ShellState, ToastMessage } from '../../shared/state';
 
@@ -30,16 +29,11 @@ export interface WorkspaceApi {
   /** File dialog for a custom tab icon; `code: 'cancelled'` when the user closed it. */
   chooseIcon(id: string): Promise<Result>;
   getAppSettings(): Promise<AppSettings>;
-  updateAppSettings(patch: AppSettingsPatch): Promise<Result<{ settings: AppSettings }>>;
   revealUserData(): Promise<void>;
   cancelTask(id: string): Promise<Result>;
   resetSession(id: string): Promise<Result>;
   /** Retries delivering the stored result to ChatGPT after an automatic delivery failed (never re-runs Claude). */
   retryReview(id: string, taskId: string): Promise<Result>;
-  /** Code blocks of Claude's last completed response (for the Copy menu). */
-  responseInfo(id: string): Promise<{ available: boolean; blocks: BlockInfo[] }>;
-  /** Copies part of Claude's last response to the clipboard; `code: 'choose'` lists the blocks to pick from. */
-  copyResponse(id: string, target: CopyTarget): Promise<Result<{ kind: CopyKind }> | { ok: false; code: 'choose'; blocks: BlockInfo[] }>;
   terminalInput(id: string, data: string): void;
   terminalResize(id: string, cols: number, rows: number): void;
   terminalRestart(id: string): Promise<void>;
@@ -53,9 +47,6 @@ export interface WorkspaceApi {
   openSetupLink(key: SetupLink): Promise<void>;
   /** Asks for the microphone (macOS, first time) or opens the OS privacy settings; returns the new status. */
   requestMicrophone(): Promise<MicrophoneStatus>;
-  diagnostics: Record<'state' | 'micStatus' | 'home' | 'submit', () => Promise<unknown>> & {
-    insert(text: string): Promise<unknown>;
-  };
   onState(cb: (s: ShellState) => void): () => void;
   onTerminalData(cb: (e: { workspaceId: string; data: string }) => void): () => void;
   onToast(cb: (t: ToastMessage) => void): () => void;

@@ -203,12 +203,12 @@ The user must see the exact prompt before execution; duplicate clicks or later C
 
 Superseded by D029.
 
-## D025 - Adapter diagnostics are development-only
+## D025 - Adapter diagnostics are development-only (removed by D047)
 
 Decision:
 The ChatGPT adapter diagnostic controls (first built for the M0 feasibility harness) are not product UI. In the product shell they exist only behind Developer → Diagnostics (off by default) and the main process refuses diagnostic IPC calls while the switch is off.
 
-The separate M0 harness (`--m0` entry point) was later removed from the codebase; the in-app Developer → Diagnostics panel remains.
+Removed: the M0 harness and, by D047, the in-app Developer → Diagnostics panel.
 
 ## D026 - Managed Claude activity and manual terminal are separate surfaces
 
@@ -306,7 +306,7 @@ The `AvvaMobile/AvvaMobile.Sidekick` repository is public and licensed under MIT
 Reason:
 Users install and update from public releases built from public source, so they can verify what they run.
 
-## D040 - Copy uses Claude's final response, not the terminal
+## D040 - Copy uses Claude's final response, not the terminal (removed by D047)
 
 Decision:
 The development pane's Copy copies from the last completed Claude response of the Workspace (Stop hook `last_assistant_message`, transcript fallback), kept in memory by `ResponseCopier` and written to the clipboard by the main process. Fenced Markdown blocks (backtick/tilde, CommonMark closing rules, list indentation stripped) are parsed from that raw text (`src/domain/response/codeBlocks.ts`): one block → its body only (no fences, label or prose); several → a menu (Code block N — language, Full response); none → the full response; ▾ always offers "Copy full response". Copy never writes `/copy` to the terminal, never scrapes terminal output and works while a task runs.
@@ -373,3 +373,13 @@ Decision:
 
 Reason:
 Detecting "the" prompt and guessing intent sent the wrong text more than once. The block the user points at is the only unambiguous source of truth, and confirming receipt through Claude's own hook keeps a failed send from looking successful.
+
+## D047 - Cleanup: exactly two send paths remain; Diagnostics and Copy-last-response removed
+
+Decision:
+- Kept: (A) the per-block *Send to Claude* button -> that block's exact text -> a managed task of that Workspace (D046); (B) that task's own final result -> review packet -> automatic handback to the same Workspace and originating conversation, with Retry on failure (D044). Verified in the real app (new task started by a real click, result delivered to and answered in the same conversation).
+- Removed: Developer -> Diagnostics (it could insert text into and submit the ChatGPT composer), the `diag:*` IPC, the developer-mode setting and `SIDEKICK_DEVELOPER`, the *Copy* button for Claude's last response (`ResponseCopier`, `response:*` IPC, code-block parsing), the "your own run finished" notification for manual terminal turns, the unused page-state fields (message counts, voice button, DOM fingerprint) and the unused `allowNonEmpty` composer option.
+- Unchanged: manual Claude terminal use (never forwarded to ChatGPT), the diagnostics log file (`events.log`: lifecycle, navigation and permission decisions), the layout-preset migration and the profile folder migration (not send paths).
+
+Reason:
+Every extra way to move text between ChatGPT and Claude is a way to send the wrong text. Only the two verified paths stay.

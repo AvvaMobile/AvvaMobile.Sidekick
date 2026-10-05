@@ -3,7 +3,7 @@ import type { ClaudeRunRequest } from '../ClaudeRunner';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sanitizeTerminalPrompt } from '../../../domain/handoff/promptText';
+import { sanitizeTerminalPrompt } from '../../../domain/prompt/promptText';
 import { InteractiveClaudeRunner, isSamePrompt } from '../InteractiveClaudeRunner';
 import { StopHookChannel, lastAssistantText, parseHookPayload, parseStopPayload, type PromptSubmitEvent, type StopEvent } from '../StopHookChannel';
 

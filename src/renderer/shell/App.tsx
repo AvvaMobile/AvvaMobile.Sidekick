@@ -16,7 +16,7 @@ import { StartPage } from './components/StartPage';
 import { TabBar } from './components/TabBar';
 import { disposeTerminal, terminalData } from './terminals';
 
-const EMPTY: ShellState = { workspaces: [], projects: [], activeWorkspaceId: null, debugMode: false };
+const EMPTY: ShellState = { workspaces: [], projects: [], activeWorkspaceId: null };
 
 function useWindowSize() {
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
@@ -124,13 +124,6 @@ export function App({ api }: { api: WorkspaceApi }) {
         }),
       restartTerminal: (id) => void api.terminalRestart(id),
       clearTerminal: (id) => api.terminalInput(id, '/clear\r'),
-      responseInfo: (id) => api.responseInfo(id),
-      copyResponse: async (id, target) => {
-        const r = await api.copyResponse(id, target);
-        if (r.ok) toast({ workspaceId: id, kind: 'success', title: r.kind === 'code' ? 'Code copied' : 'Response copied', body: '' });
-        else if (r.code !== 'choose') toast({ workspaceId: id, kind: 'error', title: 'Nothing copied', body: ('detail' in r && r.detail) || 'Copy failed.' });
-        return r.ok ? { ok: true } : r.code === 'choose' && 'blocks' in r ? { ok: false, blocks: r.blocks } : { ok: false };
-      },
       setModel: (id, model) =>
         void api.setModel(id, model).then((r) => {
           if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Model not changed', body: r.detail ?? '' });
@@ -270,7 +263,7 @@ export function App({ api }: { api: WorkspaceApi }) {
             className="devpane-frame"
             style={{ left: devFrame.x, top: devFrame.y, width: devFrame.width, height: devFrame.height, ...(view.devPaneVisible ? {} : { visibility: 'hidden', pointerEvents: 'none' }) }}
           >
-            <DevPane workspaces={state.workspaces} active={active} debugMode={state.debugMode} actions={actions} diagnostics={api.diagnostics} />
+            <DevPane workspaces={state.workspaces} active={active} actions={actions} />
           </div>
           {view.statusBar && (
             <ClaudeStatusBar

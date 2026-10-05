@@ -1,21 +1,20 @@
 import { useEffect, useState } from 'react';
-import type { AppSettings as Settings, AppSettingsPatch } from '../../../shared/settings';
+import type { AppSettings as Settings } from '../../../shared/settings';
 import type { WorkspaceApi } from '../api';
 import { Row, Section, SettingsPage } from './SettingsPage';
 
 interface Props {
   api: WorkspaceApi;
-  /** Changes whenever the shell state is pushed (another window or the menu changed a setting). */
+  /** Changes whenever the shell state is pushed. */
   refreshKey: unknown;
   onClose(): void;
 }
 
 const revealLabel = (platform: string) => (platform === 'darwin' ? 'Reveal in Finder' : platform === 'win32' ? 'Show in Explorer' : 'Show in Folder');
 
-/** App Settings (app menu → Settings…, or the gear on the Projects page). Changes are saved immediately. */
+/** App Settings (app menu → Settings…, or the gear on the Projects page). */
 export function AppSettings({ api, refreshKey, onClose }: Props) {
   const [s, setS] = useState<Settings | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -26,14 +25,6 @@ export function AppSettings({ api, refreshKey, onClose }: Props) {
       live = false;
     };
   }, [api, refreshKey]);
-
-  const update = async (patch: AppSettingsPatch) => {
-    const r = await api.updateAppSettings(patch);
-    if (r.ok) {
-      setError(null);
-      setS(r.settings);
-    } else setError(r.detail ?? 'Not saved.');
-  };
 
   return (
     <SettingsPage title="Settings" onClose={onClose}>
@@ -49,15 +40,6 @@ export function AppSettings({ api, refreshKey, onClose }: Props) {
               }
             >
               <span className="set-value">{s.defaultModel ? s.defaultModel[0]!.toUpperCase() + s.defaultModel.slice(1) : 'Claude Code default'}</span>
-            </Row>
-          </Section>
-
-          <Section title="Developer">
-            <Row label="Developer mode" hint="Shows the diagnostics tools in the development pane." error={error}>
-              <label className="switch">
-                <input type="checkbox" aria-label="Developer mode" checked={s.developerMode} onChange={(e) => void update({ developerMode: e.target.checked })} />
-                <span>{s.developerMode ? 'On' : 'Off'}</span>
-              </label>
             </Row>
           </Section>
 

@@ -20,7 +20,7 @@ import {
 /** Isolated world id for Workspace adapter scripts (page JS cannot see this world's globals). */
 const ADAPTER_WORLD_ID = 1001;
 const DEFAULT_TIMEOUT_MS = 5_000;
-export const MAX_PROMPT_CHARS = 100_000;
+const MAX_PROMPT_CHARS = 100_000;
 
 export type AdapterErrorCode =
   | 'view_unavailable'
@@ -100,10 +100,10 @@ export class ChatGPTAdapter {
 
   /**
    * Inserts text into the composer using native text input (webContents.insertText).
-   * Refuses to overwrite a draft the user is typing unless allowNonEmpty is set.
+   * Never overwrites a draft the user is typing (`composer_not_empty`).
    */
-  async insertComposerText(text: string, opts: { allowNonEmpty?: boolean } = {}): Promise<AdapterResult<{ inserted: number }>> {
-    const focus = await this.run(scriptCall(focusComposerScript, { sel: SELECTORS, requireEmpty: !opts.allowNonEmpty }));
+  async insertComposerText(text: string): Promise<AdapterResult<{ inserted: number }>> {
+    const focus = await this.run(scriptCall(focusComposerScript, { sel: SELECTORS, requireEmpty: true }));
     if (!focus.ok) return focus;
     if (!focus.value.ok) return { ok: false, code: focus.value.code, detail: focus.value.detail };
     if (!this.wc.isFocused()) this.wc.focus();

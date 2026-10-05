@@ -106,8 +106,6 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .effort-select { border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--text); padding: 6px 8px; font-size: 13px; cursor: pointer; }
 .effort-select:disabled { opacity: .45; cursor: default; }
 .menu-wrap { position: relative; }
-.copy-menu { right: auto; left: 0; top: 100%; }
-.copy-seg button:last-child { padding: 0 6px; }
 .menu { position: absolute; right: 0; top: 28px; z-index: 5; background: var(--pane-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px; min-width: 190px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
 .menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 6px 10px; border-radius: 5px; cursor: pointer; }
 .menu button:hover:not(:disabled) { background: #2f343c; }
@@ -122,13 +120,6 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .terminal-host { flex: 1; min-height: 0; position: relative; padding: 6px 0 0 8px; }
 .xterm-host { position: absolute; inset: 6px 0 0 8px; }
 .terminal-banner { display: flex; gap: 10px; align-items: center; padding: 6px 12px; background: #2a2116; color: var(--warn); font-size: 12px; }
-
-/* Diagnostics (developer only) */
-.diagnostics { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: #15171b; }
-.diag-note { font-size: 11px; color: var(--warn); }
-.diag-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.diagnostics textarea { height: 60px; background: var(--term); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: 12px 'SF Mono', Menlo, monospace; }
-.diag-log { flex: 1; overflow: auto; margin: 0; padding: 8px; background: var(--term); border-radius: 6px; font-size: 11px; white-space: pre-wrap; }
 
 /* Welcome / modals / toasts */
 .start-frame { position: absolute; right: 0; bottom: 0; background: var(--pane); overflow-y: auto; }
@@ -172,8 +163,6 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .icon-row { display: flex; align-items: center; gap: 8px; }
 .icon-preview { width: 28px; height: 28px; border-radius: 7px; object-fit: contain; }
 .icon-preview.initial { display: grid; place-items: center; color: #fff; font-weight: 700; }
-.switch { display: inline-flex; align-items: center; gap: 8px; padding-top: 5px; cursor: pointer; }
-.switch input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 @media (max-width: 720px) { .set-row { grid-template-columns: minmax(0, 1fr); } }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 20; }
 .modal { width: 440px; max-width: calc(100vw - 32px); background: var(--pane); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }

@@ -175,7 +175,7 @@ Only a delegated prompt creates a task. Manual turns do not; keystrokes and term
 
 ## 12. Completion attention behavior
 
-Implementation: tab badge (running / finished / failed), in-app toast (click selects the Workspace), OS notification when the Workspace is not the one in front (click selects it), Dock bounce and badge count on macOS while attention is pending. Selecting the Workspace clears attention; the *Send to ChatGPT* button stays available until the packet is sent.
+Implementation: tab badge (running / finished / failed), in-app toast (click selects the Workspace), OS notification when the Workspace is not the one in front (click selects it), Dock bounce and badge count on macOS while attention is pending. Selecting the Workspace clears attention. A result that could not be delivered stays available for Retry.
 
 When a task completes:
 

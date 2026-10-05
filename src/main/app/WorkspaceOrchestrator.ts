@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { buildReviewPacketBody, type GitSnapshot, type ReviewPacket } from '../../domain/review/reviewPacket';
-import { sanitizeTerminalPrompt } from '../../domain/handoff/promptText';
+import { sanitizeTerminalPrompt } from '../../domain/prompt/promptText';
 import { isTaskActive, newTask, transition, type TaskRecord } from '../../domain/task/task';
 import { initialFor } from '../../domain/workspace/workspace';
 import type { AttentionState, LatestReviewView, TaskView, WorkspaceView } from '../../shared/state';
@@ -14,7 +14,7 @@ import type { AppStateStore } from './AppStateStore';
 
 /** What the orchestrator needs from a Workspace's ChatGPT adapter. */
 export interface ChatPort {
-  insertComposerText(text: string, opts?: { allowNonEmpty?: boolean }): Promise<AdapterResult<{ inserted: number }>>;
+  insertComposerText(text: string): Promise<AdapterResult<{ inserted: number }>>;
   submitComposer(): Promise<AdapterResult<{ via: string }>>;
   /** Makes sure the view shows the conversation a result belongs to (restoring it if the user moved on); never guesses. */
   ensureConversation(url: string | null): Promise<AdapterResult<{ restored: boolean }>>;
@@ -43,7 +43,7 @@ export interface TaskFinishedNotice {
   background: boolean;
 }
 
-/** The flow is waiting for the user while the window is in the background. */
+/** A finished result could not be delivered while the window is in the background. */
 export type FlowNotice = Omit<TaskFinishedNotice, 'taskId' | 'background'>;
 
 export interface OrchestratorDeps {
@@ -54,7 +54,7 @@ export interface OrchestratorDeps {
   chatFor(workspaceId: string): ChatPort | null;
   isForeground(workspaceId: string): boolean;
   notifyTaskFinished(notice: TaskFinishedNotice): void;
-  /** Background-only nudge: one side finished and the other has not been told. */
+  /** Background-only notice: the automatic handback failed and waits for Retry. */
   notifyFlow?(notice: FlowNotice): void;
   onChange(): void;
   /** Custom icon data URL for a Workspace (presentation only). */
@@ -574,15 +574,7 @@ export class WorkspaceOrchestrator {
     };
   }
 
-  // ---------- Background nudges ----------
-
-  /** The user's own Claude turn ended in the terminal (Stop hook); managed tasks notify through `notifyTaskFinished`. */
-  observeClaudeStop(workspaceId: string): void {
-    const ws = this.deps.store.workspace(workspaceId);
-    const rt = this.runtimes.get(workspaceId);
-    if (!ws || !rt || rt.sending || rt.run || isTaskActive(this.currentTask(workspaceId))) return;
-    this.nudge(workspaceId, ws.name, 'Claude finished', 'Your own run: not sent to ChatGPT.');
-  }
+  // ---------- Failure notice ----------
 
   private nudge(workspaceId: string, workspaceName: string, title: string, body: string): void {
     if (this.deps.isForeground(workspaceId)) return;
