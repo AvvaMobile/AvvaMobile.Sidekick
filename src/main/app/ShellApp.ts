@@ -22,14 +22,14 @@ import { basename, isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as nodePty from 'node-pty';
 import { autoUpdater } from 'electron-updater';
-import { DEFAULT_SPLIT_RATIO, isValidSplitRatio, type SplitGeometry } from '../../domain/layout/splitPane';
+import { DEFAULT_SPLIT_RATIO, isValidSplitRatio } from '../../domain/layout/splitPane';
 import { isViewMode } from '../../domain/layout/viewMode';
 import { isEffortChoice, isModelChoice, parseDefaultModel, type ModelChoice } from '../../shared/models';
 import { colorForName, initialFor, isOpen, validateWorkspaceName, type WorkspaceRecord } from '../../domain/workspace/workspace';
 import type { AppSettings, ProjectSettings, SettingsTarget } from '../../shared/settings';
 import { isSetupLink, SETUP_LINKS, type SetupCheck } from '../../shared/setup';
-import { relayBounds, TOPBAR_HEIGHT, workAreaFor } from '../../shared/shellLayout';
-import { BUY_ME_A_COFFEE_URL, SHELL_CHANNELS, type ProjectEntry, type RelayButtonState, type RelayState, type ShellCommand, type ShellState, type ToastMessage } from '../../shared/state';
+import { TOPBAR_HEIGHT, workAreaFor } from '../../shared/shellLayout';
+import { BUY_ME_A_COFFEE_URL, SHELL_CHANNELS, type ProjectEntry, type ShellCommand, type ShellState, type ToastMessage } from '../../shared/state';
 import { ChatGPTAdapter, MAX_PROMPT_CHARS } from '../chatgpt/ChatGPTAdapter';
 import { InteractiveClaudeRunner } from '../claude/InteractiveClaudeRunner';
 import { isClaudeSessionId, launchCommand, loginShellEnv, resolveClaudeExecutable } from '../claude/ClaudeRunner';
@@ -58,12 +58,10 @@ interface ChatRuntime {
   adapter: ChatGPTAdapter;
 }
 
-/** One shell window: its own tab selection (split layout) and relay overlay. */
+/** One shell window: its own tab selection (split layout). */
 interface ShellWindow {
   win: BrowserWindow;
   layout: SplitLayoutController;
-  relay: WebContentsView;
-  relayState: RelayState | null;
 }
 
 const POLL_MS = 1000;
@@ -122,8 +120,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     // loadURL/loadFile are main-initiated and never pass through the will-navigate guard.
     if (process.env.ELECTRON_RENDERER_URL) await sw.win.loadURL(shellPageUrl);
     else await sw.win.loadFile(join(__dirname, '../renderer/shell/index.html'));
-    if (process.env.ELECTRON_RENDERER_URL) void sw.relay.webContents.loadURL(`${process.env.ELECTRON_RENDERER_URL}/relay/index.html`);
-    else void sw.relay.webContents.loadFile(join(__dirname, '../renderer/relay/index.html'));
   };
 
   function createShellWindow(bounds?: Rectangle): ShellWindow {
@@ -162,40 +158,15 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     win.webContents.on('will-navigate', (e) => e.preventDefault());
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-    // The round relay buttons on the divider live in their own transparent local view so they can
-    // straddle the ChatGPT view's edge (DOM in the shell renderer is always drawn below that view).
-    const relay = new WebContentsView({
-      webPreferences: {
-        preload: join(__dirname, '../preload/relay.js'),
-        contextIsolation: true,
-        sandbox: true,
-        nodeIntegration: false,
-        webSecurity: true,
-        spellcheck: false,
-      },
-    });
-    relay.setBackgroundColor('#00000000');
-    relay.setVisible(false);
-    relay.webContents.on('will-navigate', (e) => e.preventDefault());
-    relay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    win.contentView.addChildView(relay);
-
     const layout = new SplitLayoutController(
       store,
       () => {
         const [w, h] = win.getContentSize();
         return workAreaFor(w!, h!);
       },
-      (geometry: SplitGeometry | null) => {
-        if (geometry) relay.setBounds(relayBounds(geometry.splitter));
-        relay.setVisible(geometry !== null);
-      },
     );
-    const sw: ShellWindow = { win, layout, relay, relayState: null };
+    const sw: ShellWindow = { win, layout };
     windows.set(win.id, sw);
-    relay.webContents.on('did-finish-load', () => {
-      if (sw.relayState) relay.webContents.send('relay:state', sw.relayState);
-    });
 
     // In full screen the traffic lights disappear, so the strip needs no room for them.
     win.on('enter-full-screen', () => sendCommand(sw, 'fullscreen-enter'));
@@ -227,7 +198,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       // The main window stays registered (destroyed) so "the main window" is always defined until exit.
       if (sw !== mainWindow()) windows.delete(winId);
       for (const [id, owner] of windowOf) if (owner === sw) windowOf.delete(id);
-      if (!relay.webContents.isDestroyed()) relay.webContents.close();
       broadcast();
     });
     return sw;
@@ -256,8 +226,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       if (!from.win.isDestroyed()) from.win.contentView.removeChildView(c.view);
     }
     sw.win.contentView.addChildView(c.view);
-    // Re-adding moves the relay overlay back above the ChatGPT view.
-    sw.win.contentView.addChildView(sw.relay);
     sw.layout.register(id, c.view);
     windowOf.set(id, sw);
   }
@@ -502,6 +470,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       void (async () => {
         try {
           orchestrator.observeCandidate(id, await c.adapter.getLatestClaudePromptBlock());
+          await orchestrator.observeUserMessage(id);
           if (tick % LOGIN_CHECK_EVERY === 0) {
             const s = await c.adapter.getPageState();
             orchestrator.setChatLoggedIn(id, s.ok ? s.value.composerFound && !s.value.loggedOutMarkers : null);
@@ -541,20 +510,6 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
   handleIn('shell:get-state', (sw) => windowState(sw));
   handle('shell:terminal-snapshot', (id) => (known(id) ? panes.snapshot(id) : ''));
   handleIn('shell:set-overlay', (sw, hidden) => sw.layout.setSuppressed(hidden === true));
-  const relayButton = (v: unknown): RelayButtonState => {
-    const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
-    return { enabled: o.enabled === true, title: typeof o.title === 'string' ? o.title.slice(0, 200) : '' };
-  };
-  onIn('relay:set-state', (sw, s) => {
-    const o = (s && typeof s === 'object' ? s : {}) as Record<string, unknown>;
-    sw.relayState = { claude: relayButton(o.claude), chatgpt: relayButton(o.chatgpt) };
-    sw.relay.webContents.send('relay:state', sw.relayState);
-  });
-  // Clicks only from a window's relay overlay; that window's shell renderer performs the action for its active Workspace.
-  ipcMain.on('relay:click', (e, button) => {
-    const sw = [...windows.values()].find((w) => e.sender === w.relay.webContents);
-    if (sw) sendCommand(sw, button === 'chatgpt' ? 'send-review' : 'send-to-claude');
-  });
 
   handle('workspace:select', (id) => {
     if (known(id)) selectWorkspace(id);

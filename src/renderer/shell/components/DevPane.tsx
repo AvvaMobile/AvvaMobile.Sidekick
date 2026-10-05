@@ -189,6 +189,7 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
       )}
 
       {active?.autoSend && <AutoSendBar at={active.autoSend.at} onCancel={() => actions.cancelAutoSend(active.id)} />}
+      {active?.autoSendNotice && !active.autoSend && <AutoSendNotice notice={active.autoSendNotice} />}
 
       <div className="devpane-body">
         <TerminalHost
@@ -222,6 +223,22 @@ export function AutoSendBar({ at, onCancel, compact = false }: { at: string; onC
       <button className="btn ghost small" onClick={onCancel}>
         Cancel
       </button>
+    </div>
+  );
+}
+
+/** Why "send it to Claude" did not start; fades after a few seconds. */
+export function AutoSendNotice({ notice, compact = false }: { notice: { text: string; at: string }; compact?: boolean }) {
+  const [shown, setShown] = useState(true);
+  useEffect(() => {
+    setShown(true);
+    const t = setTimeout(() => setShown(false), 8_000);
+    return () => clearTimeout(t);
+  }, [notice.at, notice.text]);
+  if (!shown) return null;
+  return (
+    <div className={`review-bar auto-send-bar ${compact ? 'compact' : ''}`} role="status">
+      <span className="review-title">{notice.text}</span>
     </div>
   );
 }

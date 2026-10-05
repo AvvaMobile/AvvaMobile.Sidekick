@@ -95,6 +95,8 @@ export interface WorkspaceView {
   terminal: { running: boolean; error: string | null };
   /** The user asked ChatGPT to send the prompt to Claude: it is sent at `at` (ISO) unless cancelled (D034). */
   autoSend: { at: string } | null;
+  /** Why an auto-send request could not start or run (short, user-facing). */
+  autoSendNotice: { text: string; at: string } | null;
 }
 
 /** One row of the Projects start page: every saved Workspace, open in a tab or not. */
@@ -126,17 +128,6 @@ export interface ToastMessage {
 export const BUY_ME_A_COFFEE_URL = 'https://buymeacoffee.com/muratyilmaz';
 
 export type ShellCommand = 'send-to-claude' | 'send-review' | 'coffee-prompt' | 'setup-prompt' | 'new-workspace' | 'projects-opened' | 'fullscreen-enter' | 'fullscreen-leave';
-
-/** The two round relay buttons that sit on the ChatGPT/development divider (their own overlay view). */
-export interface RelayButtonState {
-  enabled: boolean;
-  title: string;
-}
-export interface RelayState {
-  claude: RelayButtonState;
-  chatgpt: RelayButtonState;
-}
-export type RelayButton = keyof RelayState;
 
 /** Fixed IPC channel names for the shell preload (no generic channel access). */
 export const SHELL_CHANNELS = {

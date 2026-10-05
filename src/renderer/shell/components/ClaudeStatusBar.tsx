@@ -1,6 +1,6 @@
 import type { WorkspaceView } from '../../../shared/state';
 import { claudeStatus, sendState, type ClaudeStatus } from '../viewModel';
-import { AutoSendBar } from './DevPane';
+import { AutoSendBar, AutoSendNotice } from './DevPane';
 
 const LABEL: Record<ClaudeStatus, string> = { idle: 'Idle', running: 'Running…', 'result-ready': 'Result ready', failed: 'Failed — result ready' };
 
@@ -29,6 +29,7 @@ export function ClaudeStatusBar({ active, busy, style, onSend, onSendReview, onS
       <span className="status-label">Claude: {LABEL[status]}</span>
       {send.enabled && <span className="status-hint">Prompt ready</span>}
       {active.autoSend && <AutoSendBar at={active.autoSend.at} onCancel={onCancelAutoSend} compact />}
+      {active.autoSendNotice && !active.autoSend && <AutoSendNotice notice={active.autoSendNotice} compact />}
       <span className="status-spacer" />
       {status === 'running' && (
         <button className="btn danger small" onClick={onStop}>

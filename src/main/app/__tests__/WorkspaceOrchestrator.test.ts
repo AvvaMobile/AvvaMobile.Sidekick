@@ -614,18 +614,23 @@ describe('WorkspaceOrchestrator', () => {
       chats.b!.userMessage = 'send it to Claude';
       await ready('b');
       expect(orch.view('b')!.autoSend).not.toBeNull();
-      orch.observeCandidate('b', { ok: false, code: 'no_prompt_block', detail: '' });
+      for (let i = 0; i < 3; i++) orch.observeCandidate('b', { ok: false, code: 'no_prompt_block', detail: '' });
       expect(orch.view('b')!.autoSend).toBeNull();
+      expect(orch.view('b')!.autoSendNotice!.text).toBe('No Claude prompt ready.');
       await tick(10_000);
       expect(runs).toHaveLength(0);
     });
 
-    it('ChatGPT writing again cancels the countdown', async () => {
+    it('ChatGPT replying does not cancel the countdown; the send waits until ChatGPT is quiet', async () => {
       await ready();
       orch.observeCandidate('a', { ok: false, code: 'still_generating', detail: '' });
-      expect(orch.view('a')!.autoSend).toBeNull();
+      expect(orch.view('a')!.autoSend).not.toBeNull();
       await tick(10_000);
-      expect(runs).toHaveLength(0);
+      expect(runs).toHaveLength(0); // still replying: nothing is captured yet
+      orch.observeCandidate('a', blocks.a!);
+      await tick(1_000);
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.prompt).toBe('Prompt for A');
     });
 
     it('an explicit Send to Claude during the countdown replaces it (one task only)', async () => {
@@ -660,40 +665,6 @@ describe('WorkspaceOrchestrator', () => {
       expect(runs).toHaveLength(0);
     });
 
-    it('asking to send a prompt that was already there sends it once ChatGPT has replied', async () => {
-      chats.a!.userMessage = 'Bir prompt yaz';
-      await ready();
-      expect(orch.view('a')!.autoSend).toBeNull();
-      // The user now says "send it"; ChatGPT answers without writing a new block.
-      chats.a!.userMessage = ASK;
-      chats.a!.getLatestUserMessage.mockImplementation(async () => ({ ok: true, value: { text: chats.a!.userMessage, messageId: 'u-2' } }));
-      orch.observeCandidate('a', { ok: false, code: 'still_generating', detail: '' });
-      seen('a', blocks.a!);
-      await tick(0);
-      expect(orch.view('a')!.autoSend).not.toBeNull();
-      await tick(3_000);
-      expect(runs).toHaveLength(1);
-      expect(runs[0]!.prompt).toBe('Prompt for A');
-    });
-
-    it('one request starts at most one countdown, even after Cancel', async () => {
-      chats.a!.userMessage = 'Bir prompt yaz';
-      await ready();
-      chats.a!.userMessage = ASK;
-      chats.a!.getLatestUserMessage.mockImplementation(async () => ({ ok: true, value: { text: chats.a!.userMessage, messageId: 'u-2' } }));
-      orch.observeCandidate('a', { ok: false, code: 'still_generating', detail: '' });
-      seen('a', blocks.a!);
-      await tick(0);
-      orch.cancelAutoSendRequest('a');
-      // Another reply to some other message, but the latest user message is still the same request.
-      orch.observeCandidate('a', { ok: false, code: 'still_generating', detail: '' });
-      seen('a', blocks.a!);
-      await tick(0);
-      expect(orch.view('a')!.autoSend).toBeNull();
-      await tick(10_000);
-      expect(runs).toHaveLength(0);
-    });
-
     it('the same ChatGPT message is never auto-sent twice', async () => {
       await ready();
       await tick(3_000);
@@ -706,14 +677,6 @@ describe('WorkspaceOrchestrator', () => {
       expect(orch.view('a')!.autoSend).toBeNull();
       await tick(10_000);
       expect(runs).toHaveLength(1);
-    });
-
-    it('a request whose ChatGPT message id cannot be resolved never auto-sends (the button stays)', async () => {
-      chats.a!.getLatestUserMessage.mockImplementation(async () => ({ ok: true, value: { text: ASK, messageId: null } }));
-      await ready();
-      expect(orch.view('a')!.autoSend).toBeNull();
-      await tick(10_000);
-      expect(runs).toHaveLength(0);
     });
 
     it('after a restart, an already-seen message does not auto-send', async () => {
@@ -731,6 +694,161 @@ describe('WorkspaceOrchestrator', () => {
       expect(orch2.view('a')!.autoSend).toBeNull();
       await tick(10_000);
       expect(runs).toHaveLength(0);
+    });
+  });
+  describe('the user message itself triggers auto-send (D034)', () => {
+    const tick = (ms: number) => vi.advanceTimersByTimeAsync(ms);
+    const poll = async (ws = 'a') => {
+      await orch.observeUserMessage(ws);
+    };
+    /** The user's latest ChatGPT message changes; one poll reads it. */
+    async function userSays(ws: string, text: string, id: string | null) {
+      chats[ws]!.getLatestUserMessage.mockImplementation(async () => ({ ok: true, value: { text, messageId: id } }));
+      await poll(ws);
+    }
+
+    beforeEach(async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      // Baseline: an earlier message, and a prompt ChatGPT already wrote.
+      await userSays('a', 'Write a prompt for the login screen.', 'u-1');
+      seen('a', blocks.a!);
+      await tick(0);
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('"şimdi bunu claude gönder" starts the countdown with the held candidate, no generating transition', async () => {
+      await userSays('a', 'şimdi bunu claude gönder', 'u-2');
+      expect(orch.view('a')!.autoSend).not.toBeNull();
+      await tick(2_999);
+      expect(runs).toHaveLength(0);
+      await tick(1);
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.prompt).toBe('Prompt for A');
+      expect(orch.view('a')!.task!.status).toBe('running');
+    });
+
+    it('"send this to Claude" starts the countdown', async () => {
+      await userSays('a', 'send this to Claude', 'u-2');
+      expect(orch.view('a')!.autoSend).not.toBeNull();
+    });
+
+    it('the same message seen on many polls gives one countdown and one task', async () => {
+      await userSays('a', 'şimdi bunu claude gönder', 'u-2');
+      await poll();
+      await poll();
+      await tick(1_000);
+      await poll();
+      await tick(2_000);
+      await poll();
+      await tick(10_000);
+      expect(runs).toHaveLength(1);
+    });
+
+    it('a ChatGPT reply without a block ("I cannot send it directly") keeps the candidate and the send goes through', async () => {
+      await userSays('a', 'şimdi bunu claude gönder', 'u-2');
+      orch.observeCandidate('a', { ok: false, code: 'still_generating', detail: '' });
+      orch.observeCandidate('a', blocks.a!); // reply finished, older block is still the latest one
+      expect(orch.view('a')!.candidate!.text).toBe('Prompt for A');
+      await tick(3_000);
+      expect(runs).toHaveLength(1);
+    });
+
+    it('one odd read without a block does not drop the candidate', () => {
+      orch.observeCandidate('a', { ok: false, code: 'no_prompt_block', detail: '' });
+      orch.observeCandidate('a', { ok: false, code: 'timeout', detail: '' });
+      expect(orch.view('a')!.candidate).not.toBeNull();
+      orch.observeCandidate('a', blocks.a!);
+      orch.observeCandidate('a', { ok: false, code: 'no_prompt_block', detail: '' });
+      orch.observeCandidate('a', { ok: false, code: 'no_prompt_block', detail: '' });
+      expect(orch.view('a')!.candidate).not.toBeNull(); // the miss count restarted
+    });
+
+    it('a message that is not a send request does nothing and shows nothing', async () => {
+      await userSays('a', 'Bunu biraz değiştir', 'u-2');
+      expect(orch.view('a')!.autoSend).toBeNull();
+      expect(orch.view('a')!.autoSendNotice).toBeNull();
+    });
+
+    it('the first message read after start is only a baseline (no send after a restart)', async () => {
+      orch.unregister('a');
+      orch.register('a');
+      await userSays('a', 'şimdi bunu claude gönder', 'u-9');
+      expect(orch.view('a')!.autoSend).toBeNull();
+    });
+
+    it('tells the user when there is no prompt', async () => {
+      for (let i = 0; i < 3; i++) orch.observeCandidate('a', { ok: false, code: 'no_assistant_messages', detail: '' });
+      await userSays('a', 'send this to Claude', 'u-2');
+      expect(orch.view('a')!.autoSend).toBeNull();
+      expect(orch.view('a')!.autoSendNotice!.text).toBe('No Claude prompt ready.');
+    });
+
+    it('tells the user when Claude is already working', async () => {
+      await orch.sendToClaude('a', 'button');
+      await tick(0);
+      await userSays('a', 'send this to Claude', 'u-2');
+      expect(orch.view('a')!.autoSend).toBeNull();
+      expect(orch.view('a')!.autoSendNotice!.text).toBe('Claude is already working.');
+    });
+
+    it('tells the user when the prompt was already sent', async () => {
+      await orch.sendToClaude('a', 'button');
+      await tick(0);
+      complete(runs[0]!);
+      await tick(0);
+      await userSays('a', 'send this to Claude', 'u-2');
+      expect(orch.view('a')!.autoSend).toBeNull();
+      expect(orch.view('a')!.autoSendNotice!.text).toBe('This prompt has already been sent.');
+    });
+
+    it('tells the user when the prompt changed before it was sent', async () => {
+      await userSays('a', 'send this to Claude', 'u-2');
+      blocks.a = ok('Prompt for A', 'msg-newer'); // ChatGPT wrote a newer block that the poll has not settled yet
+      await tick(3_000);
+      expect(runs).toHaveLength(0);
+      expect(orch.view('a')!.autoSendNotice!.text).toBe('Claude prompt changed. Please send again.');
+    });
+
+    it('Cancel still works and the cancelled request does not start again', async () => {
+      await userSays('a', 'send this to Claude', 'u-2');
+      orch.cancelAutoSendRequest('a');
+      await poll();
+      await tick(10_000);
+      expect(runs).toHaveLength(0);
+    });
+
+    it('Workspace A\'s request never sends Workspace B\'s prompt', async () => {
+      await userSays('b', 'Write something', 'ub-1');
+      seen('b', blocks.b!);
+      await userSays('a', 'send this to Claude', 'u-2');
+      await tick(3_000);
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.workspaceId).toBe('a');
+      expect(orch.view('b')!.task).toBeNull();
+    });
+
+    it('works with the terminal hidden (ChatGPT Focus) and the same task is there after switching to Split', async () => {
+      store.setViewMode('a', 'chatgpt-focus');
+      await userSays('a', 'şimdi bunu claude gönder', 'u-2');
+      await tick(3_000);
+      expect(runs).toHaveLength(1);
+      const taskId = orch.view('a')!.task!.id;
+      expect(orch.view('a')!.task!.status).toBe('running');
+      store.setViewMode('a', 'split');
+      const v = orch.view('a')!;
+      expect(v.viewMode).toBe('split');
+      expect(v.task!.id).toBe(taskId);
+      expect(v.task!.status).toBe('running');
+      expect(cancels).toBe(0);
+      store.setViewMode('a', 'claude-focus');
+      expect(orch.view('a')!.task!.id).toBe(taskId);
+    });
+
+    it('does nothing when the setting is off', async () => {
+      orch.setAutoSendEnabled(false);
+      await userSays('a', 'send this to Claude', 'u-2');
+      expect(orch.view('a')!.autoSend).toBeNull();
+      expect(orch.view('a')!.autoSendNotice).toBeNull();
     });
   });
   it('refuses Send to Claude while the terminal Claude is busy with another turn', async () => {

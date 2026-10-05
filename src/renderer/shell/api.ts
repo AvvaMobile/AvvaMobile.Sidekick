@@ -2,7 +2,7 @@ import type { ViewMode } from '../../domain/layout/viewMode';
 import type { AppSettings, AppSettingsPatch, ProjectSettings, ProjectSettingsPatch, SettingsTarget } from '../../shared/settings';
 import type { BlockInfo, CopyKind, CopyTarget } from '../../shared/response';
 import type { MicrophoneStatus, SetupCheck, SetupLink } from '../../shared/setup';
-import type { RelayState, ShellCommand, ShellState, ToastMessage } from '../../shared/state';
+import type { ShellCommand, ShellState, ToastMessage } from '../../shared/state';
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; code?: string; detail?: string };
 
@@ -48,8 +48,6 @@ export interface WorkspaceApi {
   setSplit(id: string, ratio: number, commit: boolean): void;
   /** ChatGPT Focus / Split / Claude Focus for a Workspace (visibility only). */
   setViewMode(id: string, mode: ViewMode): void;
-  /** State of the round relay buttons drawn by the divider overlay. */
-  setRelayState(state: RelayState): void;
   /** Opens the Buy Me a Coffee page in the default browser. */
   openCoffee(): Promise<void>;
   /** Requirements popup (D037): finds Claude Code and Git, reads the microphone permission. */

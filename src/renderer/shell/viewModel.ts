@@ -1,4 +1,4 @@
-import type { RelayState, WorkspaceView } from '../../shared/state';
+import type { WorkspaceView } from '../../shared/state';
 
 export type SendIndicator = 'none' | 'ready' | 'sent' | 'waiting' | 'running';
 
@@ -39,18 +39,6 @@ export function shortPath(p: string): string {
   if (m) return `~${m[1] ?? ''}`;
   const w = p.match(/^[A-Za-z]:\\Users\\[^\\]+(\\.*)?$/i);
   return w ? `~${w[1] ?? ''}` : p;
-}
-
-/** The divider's round relay buttons: always shown, enabled only when that hand-off is possible. */
-export function relayState(ws: WorkspaceView | null, busy: boolean): RelayState {
-  const send = sendState(ws);
-  const review = ws?.latestReview ?? null;
-  return {
-    claude: { enabled: send.enabled && !busy, title: send.enabled ? 'Send to Claude' : `Send to Claude — ${send.reason}` },
-    chatgpt: review
-      ? { enabled: review.status !== 'sending', title: review.status === 'sending' ? 'Sending to ChatGPT…' : 'Send to ChatGPT' }
-      : { enabled: false, title: 'Send to ChatGPT — available when Claude finishes' },
-  };
 }
 
 export type ClaudeStatus = 'idle' | 'running' | 'result-ready' | 'failed';

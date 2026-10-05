@@ -39,6 +39,7 @@ function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
     latestReview: null,
     terminal: { running: true, error: null },
     autoSend: null,
+    autoSendNotice: null,
     ...over,
   };
 }

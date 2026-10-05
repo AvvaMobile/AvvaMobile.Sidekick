@@ -77,11 +77,22 @@ interface Runtime {
   pendingCandidateKey: string | null;
   /** Candidate key whose user message is being checked for a send-to-Claude request. */
   autoSendCheck: string | null;
-  /** ChatGPT message id of the last user request that started a countdown (one countdown per request). */
-  lastAutoSendRequestId: string | null;
-  /** Scheduled user-requested auto-send (D034). */
-  autoSend: { key: string; messageId: string | null; at: string; timer: ReturnType<typeof setTimeout> } | null;
+  /** Latest ChatGPT user message seen by the poll: undefined until the first read (that one is only a baseline), '' when the chat has none. */
+  userMessageKey: string | undefined;
+  /** `request + candidate` pairs that already got a countdown: one request never starts two for the same prompt. */
+  scheduledPairs: Set<string>;
+  /** Consecutive observations without a usable prompt block (a single odd read must not drop the candidate). */
+  candidateMisses: number;
+  /** Short feedback for the user when an auto-send request could not start or run. */
+  notice: { text: string; at: string } | null;
+  /** Scheduled user-requested auto-send (D034). `waits`: seconds spent waiting for ChatGPT to finish its reply. */
+  autoSend: { key: string; messageId: string | null; at: string; timer: ReturnType<typeof setTimeout>; waits: number } | null;
 }
+
+/** Observations without a prompt block before the candidate is dropped. */
+const CANDIDATE_MISS_LIMIT = 3;
+/** Most 1 s waits for ChatGPT to finish replying before an armed auto-send gives up waiting. */
+const AUTO_SEND_MAX_WAITS = 90;
 
 export type OpResult = { ok: true } | { ok: false; code: string; detail: string };
 
@@ -121,7 +132,10 @@ export class WorkspaceOrchestrator {
       terminal: { running: false, error: null },
       pendingCandidateKey: null,
       autoSendCheck: null,
-      lastAutoSendRequestId: null,
+      userMessageKey: undefined,
+      scheduledPairs: new Set(),
+      candidateMisses: 0,
+      notice: null,
       autoSend: null,
     });
   }
@@ -155,6 +169,7 @@ export class WorkspaceOrchestrator {
     if (res.ok) {
       rt.generating = false;
       rt.loggedIn = true;
+      rt.candidateMisses = 0;
       const cur = this.handoff.getCandidate(workspaceId);
       const key = candidateKey(res.value.messageId, res.value.text);
       if (res.value.truncated) {
@@ -172,26 +187,28 @@ export class WorkspaceOrchestrator {
       }
     } else if (res.code === 'still_generating') {
       rt.generating = true;
-    } else if (res.code === 'no_prompt_block' || res.code === 'no_assistant_messages') {
+    } else if (res.code === 'no_prompt_block' || res.code === 'no_assistant_messages' || res.code === 'wrong_origin' || res.code === 'view_unavailable') {
       rt.generating = false;
-      this.handoff.observeCandidate(workspaceId, null);
-    } else if (res.code === 'wrong_origin' || res.code === 'view_unavailable') {
-      rt.generating = false;
-      this.handoff.observeCandidate(workspaceId, null);
+      // A prompt stays the candidate until it is really gone, not after one odd read.
+      if (++rt.candidateMisses >= CANDIDATE_MISS_LIMIT) {
+        rt.pendingCandidateKey = null;
+        this.handoff.observeCandidate(workspaceId, null);
+      }
     }
     // timeout/script_error: keep the previous state (transient).
     // A pending auto-send only survives while exactly that prompt stays ready and ChatGPT is quiet.
     const cand = this.handoff.getCandidate(workspaceId);
     const candKey = cand ? candidateKey(cand.messageId, cand.text) : null;
-    if (rt.autoSendCheck && (rt.generating || rt.autoSendCheck !== candKey)) rt.autoSendCheck = null;
-    if (rt.autoSend && (rt.generating || rt.autoSend.key !== candKey)) this.cancelAutoSend(workspaceId, rt);
+    if (rt.autoSendCheck && rt.autoSendCheck !== candKey) rt.autoSendCheck = null;
+    // ChatGPT replying to the request ("I cannot send it directly…") does not cancel it; the prompt changing does.
+    if (rt.autoSend && rt.autoSend.key !== candKey) {
+      this.cancelAutoSend(workspaceId, rt);
+      if (!candKey) this.setNotice(workspaceId, rt, NOTICE_NO_PROMPT);
+    }
     if (!wasGenerating && rt.generating) this.flow(workspaceId, 'chatgpt_started', 'ChatGPT started writing');
     // A reply only counts as finished when ChatGPT was actually read again (not when the view vanished).
     else if (wasGenerating && !rt.generating && (res.ok || res.code === 'no_prompt_block' || res.code === 'no_assistant_messages')) {
       this.flow(workspaceId, 'chatgpt_replied', 'ChatGPT finished its reply');
-      // "Send this prompt to Claude" about a prompt that was already there: ChatGPT replied without a
-      // new block, so promptReady will not fire. A new block still settling is left to promptReady.
-      if (cand && !rt.pendingCandidateKey && !this.alreadyRan(workspaceId, cand.text)) void this.maybeScheduleAutoSend(workspaceId, cand.messageId, cand.text);
     }
     const after = JSON.stringify([this.handoff.getCandidate(workspaceId)?.text, this.handoff.getCandidate(workspaceId)?.messageId, rt.generating, rt.loggedIn]);
     if (before !== after) this.deps.onChange();
@@ -533,6 +550,7 @@ export class WorkspaceOrchestrator {
         : null,
       sending: rt.sending,
       autoSend: rt.autoSend ? { at: rt.autoSend.at } : null,
+      autoSendNotice: rt.notice,
       task: task ? this.taskView(task, rt) : null,
       latestReview: this.latestReview(workspaceId, rt, task),
       terminal: rt.terminal,
@@ -632,6 +650,60 @@ export class WorkspaceOrchestrator {
   }
 
   /**
+   * Poll hook: the user's own latest ChatGPT message is itself the trigger (D034). A message not seen
+   * before that explicitly asks for the prompt to go to Claude starts the countdown right away with
+   * the candidate already held, whatever ChatGPT is doing (no new block, no generating transition).
+   * The first read of a Workspace is only a baseline, so old messages never fire after a restart.
+   */
+  async observeUserMessage(workspaceId: string): Promise<void> {
+    const rt = this.runtimes.get(workspaceId);
+    const chat = this.deps.chatFor(workspaceId);
+    if (!rt || !chat) return;
+    let res: AdapterResult<{ text: string; messageId: string | null }>;
+    try {
+      res = await chat.getLatestUserMessage();
+    } catch {
+      return;
+    }
+    if (this.runtimes.get(workspaceId) !== rt) return;
+    if (!res.ok) {
+      if (res.code === 'not_found' && rt.userMessageKey === undefined) rt.userMessageKey = ''; // an empty chat: the next message is new
+      return;
+    }
+    const key = requestKey(res.value.messageId, res.value.text);
+    const seenBefore = rt.userMessageKey;
+    rt.userMessageKey = key;
+    if (seenBefore === undefined || seenBefore === key) return;
+    if (!this.autoSendEnabled() || !isSendToClaudeRequest(res.value.text)) return;
+    this.startAutoSend(workspaceId, rt, key);
+  }
+
+  /** The user asked to send: use the candidate held now, or tell them why that is not possible. */
+  private startAutoSend(workspaceId: string, rt: Runtime, requestId: string): void {
+    if (rt.autoSend) return; // a countdown is already running
+    const cand = this.handoff.getCandidate(workspaceId);
+    if (!cand) {
+      // ChatGPT may still be writing the very prompt the user asked for: promptReady schedules that one.
+      if (!rt.generating && !rt.pendingCandidateKey) this.setNotice(workspaceId, rt, NOTICE_NO_PROMPT);
+      return;
+    }
+    const key = candidateKey(cand.messageId, cand.text);
+    const pair = `${requestId}\u0000${key}`;
+    if (rt.scheduledPairs.has(pair)) return;
+    if (this.alreadyRan(workspaceId, cand.text)) {
+      rt.scheduledPairs.add(pair);
+      this.setNotice(workspaceId, rt, NOTICE_ALREADY_SENT);
+      return;
+    }
+    if (this.taskBusy(workspaceId, rt)) {
+      rt.scheduledPairs.add(pair);
+      this.setNotice(workspaceId, rt, NOTICE_BUSY);
+      return;
+    }
+    this.armAutoSend(workspaceId, rt, key, cand.messageId, pair);
+  }
+
+  /**
    * A new Claude Prompt is ready (first time this ChatGPT message is seen): if the user's own latest
    * message explicitly asked for it to go to Claude, send it after a cancellable countdown.
    */
@@ -646,34 +718,60 @@ export class WorkspaceOrchestrator {
     try {
       const res = await chat.getLatestUserMessage();
       request = res.ok ? res.value.text : null;
-      requestId = res.ok ? res.value.messageId : null;
+      requestId = res.ok ? requestKey(res.value.messageId, res.value.text) : null;
     } catch {
       request = null;
     }
     // Anything may have changed while ChatGPT was read.
     if (this.runtimes.get(workspaceId) !== rt || rt.autoSendCheck !== key) return;
     rt.autoSendCheck = null;
-    if (!request || !isSendToClaudeRequest(request) || !this.autoSendEnabled() || rt.autoSend) return;
-    // Without a stable id the request cannot be deduplicated: the button stays the way to send.
-    if (!requestId || requestId === rt.lastAutoSendRequestId) return;
-    if (rt.generating || rt.sending || rt.run || isTaskActive(this.currentTask(workspaceId))) return;
+    if (!request || !requestId || !isSendToClaudeRequest(request) || !this.autoSendEnabled() || rt.autoSend) return;
+    const pair = `${requestId}\u0000${key}`;
+    if (rt.scheduledPairs.has(pair)) return;
+    if (this.taskBusy(workspaceId, rt)) return;
+    this.armAutoSend(workspaceId, rt, key, messageId, pair);
+  }
+
+  private taskBusy(workspaceId: string, rt: Runtime): boolean {
+    return rt.sending || !!rt.run || isTaskActive(this.currentTask(workspaceId)) || !!this.deps.claudeBusy?.(workspaceId);
+  }
+
+  private armAutoSend(workspaceId: string, rt: Runtime, key: string, messageId: string | null, pair: string): void {
     const at = new Date(this.now().getTime() + AUTO_SEND_DELAY_MS).toISOString();
     const timer = setTimeout(() => void this.fireAutoSend(workspaceId, key, messageId), AUTO_SEND_DELAY_MS);
-    rt.autoSend = { key, messageId, at, timer };
-    rt.lastAutoSendRequestId = requestId;
+    rt.autoSend = { key, messageId, at, timer, waits: 0 };
+    rt.scheduledPairs.add(pair);
+    rt.notice = null;
     this.deps.onChange();
   }
 
   private async fireAutoSend(workspaceId: string, key: string, messageId: string | null): Promise<void> {
     const rt = this.runtimes.get(workspaceId);
     if (!rt || rt.autoSend?.key !== key) return;
+    // ChatGPT is still replying: the prompt can only be captured once it is quiet, so wait for it.
+    if (rt.generating && rt.autoSend.waits < AUTO_SEND_MAX_WAITS) {
+      rt.autoSend.waits++;
+      rt.autoSend.timer = setTimeout(() => void this.fireAutoSend(workspaceId, key, messageId), 1_000);
+      return;
+    }
     rt.autoSend = null;
     this.deps.onChange();
+    if (!this.autoSendEnabled()) return;
     const cand = this.handoff.getCandidate(workspaceId);
-    if (!this.autoSendEnabled() || rt.generating || !cand || candidateKey(cand.messageId, cand.text) !== key) return;
+    if (!cand) return void this.setNotice(workspaceId, rt, NOTICE_NO_PROMPT);
+    if (candidateKey(cand.messageId, cand.text) !== key) return void this.setNotice(workspaceId, rt, NOTICE_CHANGED);
     const ws = this.deps.store.workspace(workspaceId);
     const res = await this.sendToClaude(workspaceId, 'auto_user_request', messageId);
-    if (res.ok && ws) this.nudge(workspaceId, ws.name, 'Sent to Claude', 'You asked ChatGPT to send the prompt to Claude.');
+    if (res.ok) {
+      if (ws) this.nudge(workspaceId, ws.name, 'Sent to Claude', 'You asked ChatGPT to send the prompt to Claude.');
+    } else if (this.runtimes.get(workspaceId) === rt) {
+      this.setNotice(workspaceId, rt, noticeFor(res.code, res.detail));
+    }
+  }
+
+  private setNotice(workspaceId: string, rt: Runtime, text: string): void {
+    rt.notice = { text, at: this.now().toISOString() };
+    if (this.runtimes.get(workspaceId) === rt) this.deps.onChange();
   }
 
   private cancelAutoSend(workspaceId: string, rt: Runtime): void {
@@ -701,6 +799,32 @@ export class WorkspaceOrchestrator {
 class HandbackError extends Error {}
 
 const candidateKey = (messageId: string | null, text: string) => `${messageId ?? ''}\u0000${text}`;
+/** A user message is identified by its ChatGPT id, or by its text when the page gives none. */
+const requestKey = (messageId: string | null, text: string) => messageId ?? `text:${text}`;
+
+const NOTICE_NO_PROMPT = 'No Claude prompt ready.';
+const NOTICE_BUSY = 'Claude is already working.';
+const NOTICE_ALREADY_SENT = 'This prompt has already been sent.';
+const NOTICE_CHANGED = 'Claude prompt changed. Please send again.';
+
+/** User-facing text for a refused auto-send. */
+function noticeFor(code: string, detail: string): string {
+  switch (code) {
+    case 'task_active':
+    case 'claude_busy':
+      return NOTICE_BUSY;
+    case 'already_sent':
+      return NOTICE_ALREADY_SENT;
+    case 'candidate_changed':
+      return NOTICE_CHANGED;
+    case 'no_prompt_block':
+    case 'no_assistant_messages':
+    case 'view_unavailable':
+      return NOTICE_NO_PROMPT;
+    default:
+      return detail;
+  }
+}
 
 /** First non-empty line, shortened for the flow log. */
 function firstLine(text: string): string {

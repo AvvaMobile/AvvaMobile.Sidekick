@@ -12,7 +12,8 @@ function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
   return {
     id, name: `P ${id}`, projectPath: `/Users/x/${id}`, color: '#123', initial: 'P', iconUrl: null, claudeSessionId: null, model: 'opus', effort: null,
     splitRatio: 0.6, viewMode: 'chatgpt-focus', attention: 'none', chatgpt: { generating: false, loggedIn: true }, candidate: null, sending: false, task: null,
-    latestReview: null, terminal: { running: true, error: null }, autoSend: null, ...over,
+    latestReview: null, terminal: { running: true, error: null }, autoSend: null,
+    autoSendNotice: null, ...over,
   };
 }
 const task = (status: string, over: Record<string, unknown> = {}) => ({ id: 't1', status, outcome: null, prompt: 'p', createdAt: '', error: null, review: null, ...over }) as unknown as WorkspaceView['task'];

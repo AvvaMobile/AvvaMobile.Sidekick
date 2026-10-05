@@ -15,7 +15,7 @@ import { ProjectSettings } from './components/ProjectSettings';
 import { StartPage } from './components/StartPage';
 import { TabBar } from './components/TabBar';
 import { disposeTerminal, terminalData } from './terminals';
-import { needsReviewDecision, relayState } from './viewModel';
+import { needsReviewDecision } from './viewModel';
 
 const EMPTY: ShellState = { workspaces: [], projects: [], activeWorkspaceId: null, debugMode: false };
 
@@ -175,11 +175,6 @@ export function App({ api }: { api: WorkspaceApi }) {
       }),
     [api, active, actions, queueDialog],
   );
-
-  // The divider's round relay buttons are drawn by main's overlay view; it only needs their state.
-  const relay = relayState(active, busy);
-  const relayKey = JSON.stringify(relay);
-  useEffect(() => api.setRelayState(JSON.parse(relayKey)), [api, relayKey]);
 
   // ---------- Split geometry (shared with main, D023) ----------
   const area = workAreaFor(size.w, size.h);

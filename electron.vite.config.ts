@@ -12,7 +12,7 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        input: { shell: resolve(__dirname, 'src/preload/shell.ts'), relay: resolve(__dirname, 'src/preload/relay.ts') },
+        input: { shell: resolve(__dirname, 'src/preload/shell.ts') },
         output: { format: 'cjs', entryFileNames: '[name].js' },
       },
     },
@@ -24,7 +24,6 @@ export default defineConfig({
       rollupOptions: {
         input: {
           shell: resolve(__dirname, 'src/renderer/shell/index.html'),
-          relay: resolve(__dirname, 'src/renderer/relay/index.html'),
         },
       },
     },
