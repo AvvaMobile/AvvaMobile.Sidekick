@@ -192,6 +192,11 @@ describe('isSamePrompt', () => {
     expect(isSamePrompt('a  b\n c', 'a b c')).toBe(true);
     expect(isSamePrompt('x'.repeat(300), 'x'.repeat(5000))).toBe(true);
     expect(isSamePrompt('[Pasted text #1 +40 lines]', 'long prompt')).toBe(true);
+    // Claude Code 2.1.x reports a multi-line paste wrapped in <pasted_content> (real hook payload).
+    const ours = 'Reply with the single word OK.\n\n1. Cevabında maddeler halinde yazacağın konular olursa';
+    const wrapped = `\n\n<pasted_content id="2f71">\n${ours}\n</pasted_content id="2f71">\n`;
+    expect(isSamePrompt(wrapped, ours)).toBe(true);
+    expect(isSamePrompt(wrapped, 'A different prompt entirely, not this one')).toBe(false);
     expect(isSamePrompt('ls', 'Implement the login screen')).toBe(false);
   });
 });

@@ -120,14 +120,18 @@ export class InteractiveClaudeRunner implements ClaudeRunnerPort {
 const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 /**
- * Whether a UserPromptSubmit payload is the prompt we pasted. Whitespace is normalized and a prefix
- * is compared (Claude may shorten long prompts); a missing prompt or a collapsed paste placeholder
- * counts as ours (the event still arrived after our submit).
+ * Whether a UserPromptSubmit payload is the prompt we pasted. Whitespace is normalized. Claude Code wraps a
+ * multi-line paste in `<pasted_content id="…">…</pasted_content id="…">` (and may shorten long prompts), so the
+ * reported text matches when it starts with ours or contains our opening text after such a wrapper. A missing
+ * prompt or a collapsed paste placeholder counts as ours (the event still arrived after our submit).
  */
 export function isSamePrompt(reported: string | null, ours: string): boolean {
   const a = normalize(reported ?? '');
   if (!a || a.includes('[Pasted text')) return true;
   const b = normalize(ours);
   const n = Math.min(a.length, b.length, 200);
-  return a.length >= Math.min(b.length, 20) && a.slice(0, n) === b.slice(0, n);
+  if (a.length >= Math.min(b.length, 20) && a.slice(0, n) === b.slice(0, n)) return true;
+  const unwrapped = a.replace(/^<pasted_content\b[^>]*>\s*/, '');
+  const m = Math.min(unwrapped.length, b.length, 200);
+  return unwrapped.length >= Math.min(b.length, 20) && unwrapped.slice(0, m) === b.slice(0, m);
 }
