@@ -419,6 +419,226 @@ export function takeInterceptedIntentsScript(args: { enabled: boolean }): TakeIn
   return { installed: true, intents: s.queue.splice(0) };
 }
 
+// ---------- "Send to Claude" button on every prompt/code block ----------
+
+export interface BlockSendRequest {
+  /** Unique per click (page-local counter + time). */
+  id: string;
+  /** Exactly the text of the block the clicked button belongs to, read at click time. */
+  text: string;
+  messageId: string | null;
+  blockIndex: number;
+  clickedAt: string;
+}
+
+export interface BlockSendArgs {
+  sel: PageSelectors;
+  maxChars: number;
+  /** Production: only real user clicks count; tests dispatch synthetic events. */
+  trustedOnly: boolean;
+}
+
+export type BlockSendState = 'sending' | 'started' | 'failed';
+
+interface BlockSendGuard {
+  queue: BlockSendRequest[];
+  n: number;
+}
+
+/**
+ * Injects a "Send to Claude" button right after the Copy button of every prompt/code block of the
+ * assistant messages (idempotent per document; re-scans on DOM changes). A click reads the text from the
+ * very block that holds the clicked button and queues it; nothing else (no stored candidate, no other block)
+ * is ever a source. Lives in the page's isolated world.
+ */
+export function installBlockSendButtonsScript(args: BlockSendArgs): { ok: true; installed: boolean } {
+  const w = window as unknown as { __sidekickBlockSend?: BlockSendGuard };
+  if (w.__sidekickBlockSend) return { ok: true, installed: false };
+  const state: BlockSendGuard = { queue: [], n: 0 };
+  w.__sidekickBlockSend = state;
+  const sel = args.sel;
+  const blockSel = 'pre, ' + sel.writingBlock + ', ' + sel.codeBlock;
+  const ATTR = 'data-sidekick-send';
+  const LABEL = 'Send to Claude';
+
+  const isWritingBlock = (el: Element): boolean => el.matches(sel.writingBlock);
+
+  /** The outermost block (a <pre>/<code> inside a code-block container or writing block is the same block). */
+  const outermostBlock = (from: Element): Element | null => {
+    let cur = from.closest(blockSel);
+    while (cur && cur.parentElement?.closest(blockSel)) cur = cur.parentElement.closest(blockSel);
+    return cur;
+  };
+
+  const unwrapFence = (md: string): string => {
+    const m = md.trim().match(/^(`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n\1\s*$/);
+    return m ? m[2]! : md;
+  };
+  const blockText = (el: Element): string => {
+    let raw: string;
+    if (isWritingBlock(el)) {
+      const content = el.querySelector('[data-markdown-copy-content]') as HTMLElement | null;
+      const md = el.getAttribute('data-markdown-copy-text');
+      raw = md != null ? unwrapFence(md) : (content?.innerText ?? content?.textContent ?? '');
+    } else {
+      const code = el.querySelector('code');
+      raw = (code ?? el).textContent ?? '';
+    }
+    return raw.replace(/ /g, ' ').replace(/\s+$/, '');
+  };
+
+  const messageOf = (block: Element): Element | null => block.closest(sel.assistantMessage);
+  const messageIdOf = (msg: Element): string | null =>
+    msg.getAttribute('data-message-id') ??
+    msg.querySelector('[data-chatgpt-selection-message-id]')?.getAttribute('data-chatgpt-selection-message-id') ??
+    msg.getAttribute('data-chatgpt-search-message-ids')?.split(/\s+/)[0] ??
+    (msg.id || null);
+
+  const detailEl = (btn: HTMLElement): HTMLElement | null => (btn.nextElementSibling?.hasAttribute(ATTR + '-detail') ? (btn.nextElementSibling as HTMLElement) : null);
+  const setLabel = (btn: HTMLElement, text: string, st: string, detail?: string): void => {
+    btn.textContent = text;
+    btn.setAttribute(ATTR, st);
+    btn.setAttribute('aria-label', text);
+    btn.title = detail ?? '';
+    btn.style.color = st === 'failed' ? '#d92d20' : '';
+    let d = detailEl(btn);
+    if (detail && st === 'failed') {
+      if (!d) {
+        d = document.createElement('span');
+        d.setAttribute(ATTR + '-detail', '');
+        d.style.cssText = 'font-size:12px;color:#d92d20;margin-left:6px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;align-self:center';
+        btn.insertAdjacentElement('afterend', d);
+      }
+      d.textContent = detail;
+      d.title = detail;
+    } else d?.remove();
+  };
+
+  const fail = (btn: HTMLElement, detail: string): void => setLabel(btn, 'Send failed — Retry', 'failed', detail);
+
+  const makeButton = (copy: HTMLElement): HTMLElement => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = copy.className;
+    btn.style.cssText = 'width:auto;padding:0 8px;font-size:12px;white-space:nowrap;cursor:pointer;display:inline-flex;align-items:center';
+    setLabel(btn, LABEL, 'idle');
+    return btn;
+  };
+
+  const inject = (): void => {
+    for (const msg of Array.from(document.querySelectorAll(sel.assistantMessage))) {
+      for (const block of Array.from(msg.querySelectorAll(blockSel))) {
+        if (block.parentElement?.closest(blockSel) || block.querySelector('[' + ATTR + ']')) continue;
+        const copy = block.querySelector('button[aria-label="Copy"]') as HTMLElement | null;
+        if (!copy || copy.hasAttribute(ATTR)) continue;
+        copy.insertAdjacentElement('afterend', makeButton(copy));
+      }
+    }
+  };
+
+  document.addEventListener(
+    'click',
+    (e) => {
+      const t = e.target as Element | null;
+      const btn = t && typeof t.closest === 'function' ? (t.closest('[' + ATTR + ']') as HTMLElement | null) : null;
+      if (!btn || btn.hasAttribute(ATTR + '-detail')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      if (args.trustedOnly && !e.isTrusted) return;
+      if (btn.getAttribute(ATTR) === 'sending') return;
+      try {
+        const block = outermostBlock(btn);
+        const msg = block ? messageOf(block) : null;
+        if (!block || !msg) return fail(btn, 'Could not find this block');
+        if (document.querySelector(sel.stopButton) || document.querySelector(sel.incompleteAssistant)) return fail(btn, 'ChatGPT is still writing — try again when it finishes');
+        const text = blockText(block);
+        if (!text.trim()) return fail(btn, 'This block is empty');
+        if (text.length > args.maxChars) return fail(btn, 'This block is too large to send');
+        const blocks = Array.from(msg.querySelectorAll(blockSel)).filter((b) => !b.parentElement?.closest(blockSel));
+        const id = `${Date.now().toString(36)}-${++state.n}`;
+        btn.setAttribute(ATTR + '-id', id);
+        setLabel(btn, 'Sending…', 'sending');
+        state.queue.push({ id, text, messageId: messageIdOf(msg), blockIndex: blocks.indexOf(block), clickedAt: new Date().toISOString() });
+      } catch {
+        fail(btn, 'Could not read this block');
+      }
+    },
+    true,
+  );
+
+  let scheduled = false;
+  const schedule = (): void => {
+    if (scheduled) return;
+    scheduled = true;
+    setTimeout(() => {
+      scheduled = false;
+      try {
+        inject();
+      } catch {
+        // never break the page
+      }
+    }, 150);
+  };
+  new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+  inject();
+  return { ok: true, installed: true };
+}
+
+export interface TakeBlockSendsResult {
+  installed: boolean;
+  requests: BlockSendRequest[];
+}
+
+/** Atomically takes (and clears) the queued block sends. `installed: false` means the page was reloaded (reinstall). */
+export function takeBlockSendsScript(): TakeBlockSendsResult {
+  const s = (window as unknown as { __sidekickBlockSend?: BlockSendGuard }).__sidekickBlockSend;
+  if (!s) return { installed: false, requests: [] };
+  return { installed: true, requests: s.queue.splice(0) };
+}
+
+/** Shows the outcome of one click on its own button: sending / started (Claude confirmed receipt) / failed (+ reason, Retry). */
+export function setBlockSendStatusScript(args: { id: string; state: BlockSendState; detail: string }): { found: boolean } {
+  const btn = document.querySelector('[data-sidekick-send-id="' + args.id + '"]') as HTMLElement | null;
+  if (!btn) return { found: false };
+  const ATTR = 'data-sidekick-send';
+  const next = btn.nextElementSibling;
+  if (args.state === 'failed') {
+    btn.textContent = 'Send failed — Retry';
+    btn.setAttribute(ATTR, 'failed');
+    btn.title = args.detail;
+    btn.style.color = '#d92d20';
+    let d = next?.hasAttribute(ATTR + '-detail') ? (next as HTMLElement) : null;
+    if (!d) {
+      d = document.createElement('span');
+      d.setAttribute(ATTR + '-detail', '');
+      d.style.cssText = 'font-size:12px;color:#d92d20;margin-left:6px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;align-self:center';
+      btn.insertAdjacentElement('afterend', d);
+    }
+    d.textContent = args.detail;
+    d.title = args.detail;
+    return { found: true };
+  }
+  if (next?.hasAttribute(ATTR + '-detail')) next.remove();
+  btn.style.color = '';
+  btn.title = args.detail;
+  if (args.state === 'sending') {
+    btn.textContent = 'Sending…';
+    btn.setAttribute(ATTR, 'sending');
+  } else {
+    btn.textContent = 'Sent to Claude ✓';
+    btn.setAttribute(ATTR, 'started');
+    setTimeout(() => {
+      if (btn.getAttribute(ATTR) === 'started') {
+        btn.textContent = 'Send to Claude';
+        btn.setAttribute(ATTR, 'idle');
+        btn.title = '';
+      }
+    }, 8000);
+  }
+  return { found: true };
+}
+
 /** Serialized install call: the guard plus the self-contained intent matcher, args JSON-encoded. */
 export function intentGuardCall(args: IntentGuardArgs, isIntent: (text: string) => boolean): PageScript<{ ok: true; installed: boolean }> {
   return `(${installIntentGuardScript.toString()})(${JSON.stringify(args)}, ${isIntent.toString()})` as PageScript<{ ok: true; installed: boolean }>;

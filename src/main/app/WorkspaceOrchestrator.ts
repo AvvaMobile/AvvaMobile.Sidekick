@@ -23,6 +23,16 @@ export interface ChatPort extends PromptCandidateSource {
   ensureConversation(url: string | null): Promise<AdapterResult<{ restored: boolean }>>;
   /** The user's latest ChatGPT message (read only to detect an explicit "send it to Claude", D034). */
   getLatestUserMessage(): Promise<AdapterResult<{ text: string; messageId: string | null }>>;
+  /** Conversation the view shows now (the source of a block send). */
+  getConversationUrl?(): string | null;
+}
+
+/** Outcome of one click on a block's "Send to Claude" button, shown on that button. */
+export interface BlockSendStatus {
+  id: string;
+  /** started = Claude reported (UserPromptSubmit) that it received exactly this prompt. */
+  state: 'started' | 'failed';
+  detail: string;
 }
 
 export interface TaskFinishedNotice {
@@ -60,6 +70,8 @@ export interface OrchestratorDeps {
   taskSettled?(workspaceId: string): void;
   /** Automatic handback: how long (ms) and how often to wait for ChatGPT to be free (replying / draft in the box). */
   handbackWait?: { intervalMs: number; maxWaits: number };
+  /** Shows a block button's outcome (ChatGPT page). */
+  blockSendStatus?(workspaceId: string, status: BlockSendStatus): void;
   newId?: () => string;
   now?: () => Date;
 }
@@ -87,6 +99,8 @@ interface Runtime {
   scheduledPairs: Set<string>;
   /** Consecutive observations without a usable prompt block (a single odd read must not drop the candidate). */
   candidateMisses: number;
+  /** The block-button click whose task has not been confirmed started by Claude yet. */
+  blockSend: { id: string; started: boolean } | null;
   /** Short feedback for the user when an auto-send request could not start or run. */
   notice: { text: string; at: string } | null;
   /** An intercepted command that arrived while ChatGPT was still writing the prompt: it fires with that prompt (D045). */
@@ -144,6 +158,7 @@ export class WorkspaceOrchestrator {
       userMessageKey: undefined,
       scheduledPairs: new Set(),
       candidateMisses: 0,
+      blockSend: null,
       notice: null,
       pendingIntent: null,
       autoSend: null,
@@ -254,7 +269,12 @@ export class WorkspaceOrchestrator {
    * Explicit Send to Claude (single click, D024): capture the latest Claude Prompt block of this
    * Workspace, freeze it into a Task and start Claude. Re-entrant clicks are ignored.
    */
-  async sendToClaude(workspaceId: string, trigger: HandoffTrigger, expectMessageId?: string | null): Promise<OpResult & { taskId?: string }> {
+  async sendToClaude(
+    workspaceId: string,
+    trigger: HandoffTrigger,
+    expectMessageId?: string | null,
+    explicit?: { requestId: string; text: string; messageId: string | null },
+  ): Promise<OpResult & { taskId?: string }> {
     const ws = this.deps.store.workspace(workspaceId);
     const rt = this.runtimes.get(workspaceId);
     if (!ws || !rt) return { ok: false, code: 'unknown_workspace', detail: 'Workspace not found' };
@@ -274,7 +294,10 @@ export class WorkspaceOrchestrator {
     let frozen: FrozenTask;
     let finalPrompt: string;
     try {
-      const res = await this.handoff.send(workspaceId, chat, trigger);
+      // A block button sends exactly the clicked block's text: no capture, no candidate, no suffix.
+      const res = explicit
+        ? this.handoff.freezeText(workspaceId, explicit.text, explicit.messageId, chat.getConversationUrl?.() ?? null, trigger)
+        : await this.handoff.send(workspaceId, chat, trigger);
       if (!res.ok) return res;
       // Auto-send only ever sends the very ChatGPT message the user's request was about.
       if (expectMessageId !== undefined && res.task.sourceMessageId !== expectMessageId)
@@ -285,7 +308,7 @@ export class WorkspaceOrchestrator {
         return { ok: false, code: 'already_sent', detail: 'This Claude Prompt was already run successfully. Ask ChatGPT for a new prompt.' };
       frozen = res.task;
       // Frozen here: later Settings changes never touch this task.
-      finalPrompt = composeClaudePrompt(frozen.prompt, this.deps.store.preferences().claudePromptSuffix);
+      finalPrompt = explicit ? frozen.prompt : composeClaudePrompt(frozen.prompt, this.deps.store.preferences().claudePromptSuffix);
     } finally {
       rt.sending = false;
     }
@@ -307,10 +330,34 @@ export class WorkspaceOrchestrator {
     rt.attention = 'none';
     // Placeholder handle so nothing else can start before the process exists.
     rt.run = { cancel: () => (rt.cancelRequested = true) };
+    rt.blockSend = explicit ? { id: explicit.requestId, started: false } : null;
     this.flow(workspaceId, 'sent_to_claude', firstLine(task.prompt), frozen.sourceMessageId);
     this.deps.onChange();
     void this.run(workspaceId, task).catch((err: unknown) => this.crashed(workspaceId, task, err));
     return { ok: true, taskId: task.id };
+  }
+
+  /**
+   * The "Send to Claude" button of one prompt/code block was clicked: `req.text` is that block's own text.
+   * Success is only reported once Claude confirms it received the prompt (`submitted`); every refusal or later
+   * failure before that is reported back to the same button.
+   */
+  async sendBlockToClaude(workspaceId: string, req: { id: string; text: string; messageId: string | null }): Promise<void> {
+    const report = (state: BlockSendStatus['state'], detail: string) => this.deps.blockSendStatus?.(workspaceId, { id: req.id, state, detail });
+    try {
+      const res = await this.sendToClaude(workspaceId, 'block-button', undefined, { requestId: req.id, text: req.text, messageId: req.messageId });
+      if (!res.ok) report('failed', noticeFor(res.code, res.detail));
+    } catch (err) {
+      report('failed', `Unexpected error: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200));
+    }
+  }
+
+  /** The block-button task ended without Claude ever confirming the prompt: tell its button. */
+  private failBlockSend(workspaceId: string, rt: Runtime, detail: string): void {
+    const b = rt.blockSend;
+    if (!b || b.started) return;
+    rt.blockSend = null;
+    this.deps.blockSendStatus?.(workspaceId, { id: b.id, state: 'failed', detail });
   }
 
   cancelTask(workspaceId: string): OpResult {
@@ -342,6 +389,7 @@ export class WorkspaceOrchestrator {
       task.outcome = 'cancelled';
       task.completedAt = this.now().toISOString();
       rt.run = null;
+      this.failBlockSend(workspaceId, rt, 'Cancelled before Claude started');
       await this.finish(workspaceId, task, before);
       return;
     }
@@ -361,6 +409,9 @@ export class WorkspaceOrchestrator {
         const live = this.runtimes.get(workspaceId);
         if (!live) return;
         live.run = null;
+        if (live.blockSend && !live.blockSend.started) {
+          this.failBlockSend(workspaceId, live, live.cancelRequested || exit.cancelled ? 'Cancelled before Claude started' : (exit.spawnError ?? 'Claude did not confirm receiving the prompt'));
+        }
         task.processExitCode = exit.code;
         task.processSignal = exit.signal;
         task.completedAt = this.now().toISOString();
@@ -386,7 +437,10 @@ export class WorkspaceOrchestrator {
   /** An unexpected error while starting or finishing a task: never leave it queued/running forever. */
   private crashed(workspaceId: string, task: TaskRecord, err: unknown): void {
     const rt = this.runtimes.get(workspaceId);
-    if (rt) rt.run = null;
+    if (rt) {
+      rt.run = null;
+      this.failBlockSend(workspaceId, rt, 'Unexpected error while starting Claude');
+    }
     if (isTaskActive(task)) {
       transition(task, 'failed');
       task.outcome = 'failed';
@@ -406,6 +460,12 @@ export class WorkspaceOrchestrator {
     const rt = this.runtimes.get(workspaceId);
     if (!rt) return;
     switch (ev.type) {
+      case 'submitted':
+        if (rt.blockSend && !rt.blockSend.started) {
+          rt.blockSend.started = true;
+          this.deps.blockSendStatus?.(workspaceId, { id: rt.blockSend.id, state: 'started', detail: 'Claude received this block and started working' });
+        }
+        break;
       case 'init':
         this.recordSession(workspaceId, task, ev.sessionId);
         break;

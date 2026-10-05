@@ -9,6 +9,12 @@ import {
   focusComposerScript,
   intentGuardCall,
   takeInterceptedIntentsScript,
+  installBlockSendButtonsScript,
+  takeBlockSendsScript,
+  setBlockSendStatusScript,
+  type BlockSendRequest,
+  type BlockSendState,
+  type TakeBlockSendsResult,
   type InterceptedIntent,
   type TakeIntentsResult,
   latestClaudePromptBlockScript,
@@ -46,7 +52,7 @@ export type AdapterErrorCode =
 
 export type AdapterResult<T> = { ok: true; value: T } | { ok: false; code: AdapterErrorCode; detail: string };
 
-export type { InterceptedIntent };
+export type { InterceptedIntent, BlockSendRequest, BlockSendState };
 
 export interface ClaudePromptCandidate {
   text: string;
@@ -126,6 +132,22 @@ export class ChatGPTAdapter {
   /** Takes the commands the guard stopped before ChatGPT saw them; `installed: false` means the page was reloaded (reinstall). */
   async takeInterceptedIntents(enabled: boolean): Promise<AdapterResult<TakeIntentsResult>> {
     return this.run(scriptCall(takeInterceptedIntentsScript, { enabled }), 2_000);
+  }
+
+  /** Injects the per-block "Send to Claude" buttons (idempotent per document). */
+  async installBlockSendButtons(): Promise<AdapterResult<{ installed: boolean }>> {
+    const res = await this.run(scriptCall(installBlockSendButtonsScript, { sel: SELECTORS, maxChars: MAX_PROMPT_CHARS, trustedOnly: true }));
+    return res.ok ? { ok: true, value: { installed: res.value.installed } } : res;
+  }
+
+  /** Takes the clicks on block buttons since the last call; `installed: false` means the page was reloaded (reinstall). */
+  async takeBlockSends(): Promise<AdapterResult<TakeBlockSendsResult>> {
+    return this.run(scriptCall(takeBlockSendsScript, undefined as void), 2_000);
+  }
+
+  /** Shows a click's outcome on its own button. */
+  async setBlockSendStatus(id: string, state: BlockSendState, detail: string): Promise<AdapterResult<{ found: boolean }>> {
+    return this.run(scriptCall(setBlockSendStatusScript, { id, state, detail }), 2_000);
   }
 
   async getLatestUserMessage(maxChars = 2_000): Promise<AdapterResult<LatestTextResult & { ok: true }>> {

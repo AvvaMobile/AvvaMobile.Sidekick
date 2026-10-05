@@ -299,6 +299,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       return !!sw && sw.layout.activeWorkspaceId === id && !sw.win.isDestroyed() && sw.win.isFocused() && !sw.win.isMinimized();
     },
     notifyTaskFinished: (n) => notifyFinished(n),
+    blockSendStatus: (id, st) => void chats.get(id)?.adapter.setBlockSendStatus(st.id, st.state, st.detail),
     notifyFlow: (n) => notifyFinished({ ...n, taskId: '', background: true }),
     onChange: broadcast,
     iconFor: (id) => icons.dataUrl(id, store.workspace(id)?.iconFile),
@@ -382,7 +383,10 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       if (store.workspace(w.id)!.chatConversationUrl !== stored) store.updateWorkspace(w.id, { chatConversationUrl: stored });
     };
     // The pre-submit command guard (D045) is idempotent; the intent poll also reinstalls it after a reload.
-    const guard = () => void adapter.installIntentGuard();
+    const guard = () => {
+      void adapter.installIntentGuard();
+      void adapter.installBlockSendButtons();
+    };
     view.webContents.on('did-finish-load', guard);
     view.webContents.on('did-navigate', (_e, url) => {
       trackUrl(url);
@@ -507,6 +511,26 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
           for (const intent of res.value.intents) orchestrator.observeInterceptedIntent(id, intent);
         } finally {
           intentInFlight.delete(id);
+        }
+      })();
+    }
+  }, INTENT_POLL_MS);
+
+  // Clicks on a block's own "Send to Claude" button: each carries exactly that block's text.
+  const blockSendInFlight = new Set<string>();
+  const blockSendPoll = setInterval(() => {
+    for (const [id, c] of chats) {
+      if (blockSendInFlight.has(id) || c.view.webContents.isLoading()) continue;
+      blockSendInFlight.add(id);
+      void (async () => {
+        try {
+          const res = await c.adapter.takeBlockSends();
+          if (!res.ok) return;
+          // A reloaded page lost the buttons (they live in the page's isolated world): put them back.
+          if (!res.value.installed) await c.adapter.installBlockSendButtons();
+          for (const req of res.value.requests) void orchestrator.sendBlockToClaude(id, req);
+        } finally {
+          blockSendInFlight.delete(id);
         }
       })();
     }
@@ -1103,6 +1127,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     quitting = true;
     clearInterval(poll);
     clearInterval(intentPoll);
+    clearInterval(blockSendPoll);
     updates.stop();
     orchestrator.shutdown();
     pty.stopAll();

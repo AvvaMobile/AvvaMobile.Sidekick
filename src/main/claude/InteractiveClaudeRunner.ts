@@ -76,7 +76,9 @@ export class InteractiveClaudeRunner implements ClaudeRunnerPort {
     let submitted = false;
     cleanups.push(
       this.stops.onPromptSubmit(req.workspaceId, (e) => {
-        if (!done && !submitted && isSamePrompt(e.prompt, prompt)) submitted = true;
+        if (done || submitted || !isSamePrompt(e.prompt, prompt)) return;
+        submitted = true;
+        req.onEvent({ type: 'submitted' });
       }),
       this.stops.onInterrupt(req.workspaceId, () => finish(null, null, true)),
       this.stops.onStop(req.workspaceId, (e) => {

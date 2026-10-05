@@ -6,6 +6,8 @@ import { posix, win32 } from 'node:path';
 /** What a managed run reports back: the Claude session id, then the turn's final result (D006). */
 export type ClaudeStreamEvent =
   | { type: 'init'; sessionId: string }
+  /** Claude reported (UserPromptSubmit) that it received exactly this task's prompt: the task really started. */
+  | { type: 'submitted' }
   | { type: 'result'; isError: boolean; subtype: string; result: string | null; sessionId: string | null };
 
 export interface ClaudeRunRequest {

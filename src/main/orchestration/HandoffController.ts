@@ -13,6 +13,8 @@ export type HandoffTrigger =
   | 'button'
   | 'shortcut'
   | 'voice-command'
+  /** The "Send to Claude" button on one prompt/code block: exactly that block's text, no capture. */
+  | 'block-button'
   /** The user's own ChatGPT message asked for the prompt to be sent to Claude (D034); fired after a cancellable countdown. */
   | 'auto_user_request';
 
@@ -70,6 +72,20 @@ export class HandoffController {
       createdAt: this.now().toISOString(),
     });
     return { ok: true, task };
+  }
+
+  /**
+   * Freezes exactly the given text (the block whose button was clicked). Never reads the candidate or the page:
+   * the text is the only source.
+   */
+  freezeText(workspaceId: string, text: string, sourceMessageId: string | null, conversationUrl: string | null, trigger: HandoffTrigger): FreezeResult {
+    if (!workspaceId) return { ok: false, code: 'invalid_workspace', detail: 'workspaceId required' };
+    const prompt = sanitizeTerminalPrompt(text);
+    if (!prompt.trim()) return { ok: false, code: 'no_prompt_block', detail: 'The block is empty' };
+    return {
+      ok: true,
+      task: Object.freeze({ taskId: this.newId(), workspaceId, prompt, sourceMessageId, conversationUrl, trigger, createdAt: this.now().toISOString() }),
+    };
   }
 
   forget(workspaceId: string): void {
