@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { computeSplitGeometry, ratioFromPointer } from '../../domain/layout/splitPane';
+import { computeLayoutGeometry, computeSplitGeometry, isGptHidden, isTerminalHidden, ratioFromPointer } from '../../domain/layout/splitPane';
 import { workAreaFor } from '../../shared/shellLayout';
 import type { SettingsTarget } from '../../shared/settings';
 import type { ShellState, ToastMessage } from '../../shared/state';
@@ -182,7 +182,13 @@ export function App({ api }: { api: WorkspaceApi }) {
   // ---------- Split geometry (shared with main, D023) ----------
   const area = workAreaFor(size.w, size.h);
   const ratio = dragRatio ?? active?.splitRatio ?? 0.6;
-  const geo = computeSplitGeometry(area, ratio);
+  // Dragging the divider turns the layout custom immediately (main persists it on release).
+  const layoutMode = dragRatio !== null ? 'custom' : (active?.layoutMode ?? 'custom');
+  const geo = computeLayoutGeometry(area, layoutMode, ratio);
+  const gptHidden = isGptHidden(layoutMode);
+  const terminalHidden = isTerminalHidden(layoutMode);
+  // A hidden terminal keeps a real size (offscreen-free, just invisible) so xterm/PTY never reflow to ~0 columns.
+  const devFrame = terminalHidden ? computeSplitGeometry(area, ratio).devPane : geo.devPane;
   const dragging = useRef(false);
   const frame = useRef(0);
   const latest = useRef(ratio);
@@ -248,6 +254,8 @@ export function App({ api }: { api: WorkspaceApi }) {
           setShowStart(true);
         }}
         onCloseStart={() => setShowStart(false)}
+        layoutMode={!settings && active ? layoutMode : null}
+        onLayout={(mode) => active && api.setLayoutMode(active.id, mode)}
       />
 
       {settings ? (
@@ -260,9 +268,12 @@ export function App({ api }: { api: WorkspaceApi }) {
         </div>
       ) : active ? (
         <>
+          {!gptHidden && (
           <div className="chat-placeholder" style={{ left: geo.chatgpt.x, top: geo.chatgpt.y, width: geo.chatgpt.width, height: geo.chatgpt.height }}>
             Loading ChatGPT…
           </div>
+          )}
+          {!gptHidden && !terminalHidden && (
           <div
             className="splitter"
             role="separator"
@@ -274,7 +285,11 @@ export function App({ api }: { api: WorkspaceApi }) {
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
           />
-          <div className="devpane-frame" style={{ left: geo.devPane.x, top: geo.devPane.y, width: geo.devPane.width, height: geo.devPane.height }}>
+          )}
+          <div
+            className="devpane-frame"
+            style={{ left: devFrame.x, top: devFrame.y, width: devFrame.width, height: devFrame.height, ...(terminalHidden ? { visibility: 'hidden', pointerEvents: 'none' } : {}) }}
+          >
             <DevPane workspaces={state.workspaces} active={active} debugMode={state.debugMode} actions={actions} diagnostics={api.diagnostics} />
           </div>
         </>

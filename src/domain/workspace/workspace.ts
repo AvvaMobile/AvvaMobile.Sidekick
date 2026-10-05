@@ -1,5 +1,6 @@
 import type { EffortChoice, ModelChoice } from '../../shared/models';
 import type { FlowEntry } from '../../shared/state';
+import type { LayoutMode } from '../layout/splitPane';
 
 export interface WorkspaceRecord {
   id: string;
@@ -13,7 +14,7 @@ export interface WorkspaceRecord {
   chatConversationUrl: string | null;
   claudeSessionId: string | null;
   /** Older state files may also carry a `devPaneMode` here; it is ignored. */
-  uiState: { splitRatio: number };
+  uiState: { splitRatio: number; /** Absent in records saved before presets: treated as 'custom'. */ layoutMode?: LayoutMode };
   lastTaskId: string | null;
   /** Custom icon image (file name under `<userData>/icons`), or none for the colored initial. */
   iconFile?: string | null;

@@ -1,3 +1,4 @@
+import type { LayoutMode } from '../domain/layout/splitPane';
 import type { EffortChoice, ModelChoice } from './models';
 /**
  * Serializable view state shared by the main process and the trusted shell renderer.
@@ -82,6 +83,7 @@ export interface WorkspaceView {
   /** Effort level of the terminal's Claude Code (the explicit choice; null = Claude Code's own default). */
   effort: EffortChoice | null;
   splitRatio: number;
+  layoutMode: LayoutMode;
   attention: AttentionState;
   chatgpt: { generating: boolean; loggedIn: boolean | null };
   candidate: CandidateView | null;

@@ -1,7 +1,7 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { renameWithRetry } from './renameWithRetry';
-import { DEFAULT_SPLIT_RATIO, isValidSplitRatio, type SplitRatio } from '../../domain/layout/splitPane';
+import { DEFAULT_LAYOUT_MODE, DEFAULT_SPLIT_RATIO, isLayoutMode, isValidSplitRatio, type LayoutMode, type SplitRatio } from '../../domain/layout/splitPane';
 import type { ReviewPacket } from '../../domain/review/reviewPacket';
 import type { TaskRecord } from '../../domain/task/task';
 import { isPermutation } from '../../domain/workspace/order';
@@ -120,6 +120,19 @@ export class AppStateStore implements SplitRatioStore {
     const w = this.workspace(workspaceId);
     if (!w || !isValidSplitRatio(ratio) || w.uiState.splitRatio === ratio) return;
     w.uiState = { ...w.uiState, splitRatio: ratio };
+    this.save();
+  }
+
+  /** Records written before presets existed have no layoutMode: their saved ratio continues as `custom`. */
+  getLayoutMode(workspaceId: string): LayoutMode {
+    const m = this.workspace(workspaceId)?.uiState.layoutMode;
+    return isLayoutMode(m) ? m : DEFAULT_LAYOUT_MODE;
+  }
+
+  setLayoutMode(workspaceId: string, mode: LayoutMode): void {
+    const w = this.workspace(workspaceId);
+    if (!w || !isLayoutMode(mode) || w.uiState.layoutMode === mode) return;
+    w.uiState = { ...w.uiState, layoutMode: mode };
     this.save();
   }
 

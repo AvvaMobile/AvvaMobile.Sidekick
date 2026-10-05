@@ -39,6 +39,21 @@ describe('AppStateStore', () => {
     expect(r.get().activeWorkspaceId).toBe('b');
   });
 
+  it('persists layout mode per Workspace; records without one migrate to custom keeping their ratio', () => {
+    const file = tmpFile();
+    const s = new AppStateStore(file, 0);
+    s.addWorkspace(ws('a'));
+    s.addWorkspace(ws('b'));
+    s.setSplitRatio('a', 0.37);
+    s.setLayoutMode('b', 'split-80-20');
+    const r = new AppStateStore(file, 0);
+    expect(r.getLayoutMode('a')).toBe('custom');
+    expect(r.getSplitRatio('a')).toBe(0.37);
+    expect(r.getLayoutMode('b')).toBe('split-80-20');
+    s.setLayoutMode('a', 'bogus' as never);
+    expect(new AppStateStore(file, 0).getLayoutMode('a')).toBe('custom');
+  });
+
   it('marks running tasks interrupted after a restart and keeps review packets', () => {
     const file = tmpFile();
     const s = new AppStateStore(file, 0);

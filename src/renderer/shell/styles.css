@@ -38,7 +38,7 @@ code, pre { font-family: 'SF Mono', Menlo, ui-monospace, monospace; }
 /* Windows: no traffic lights; the caption-button overlay (min/max/close) covers the strip's right end. */
 html.platform-win32 .topbar { padding: 0 140px 0 8px; }
 html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
-.tab, .tab-add { -webkit-app-region: no-drag; }
+.tab, .tab-add, .layout-presets { -webkit-app-region: no-drag; }
 .tabs { flex: 1; min-width: 0; align-self: stretch; display: flex; }
 .tab-list { display: flex; align-items: flex-end; gap: 4px; overflow-x: auto; overflow-y: hidden; padding: 6px 2px 0; scrollbar-width: none; }
 .tab-list::-webkit-scrollbar { display: none; }
@@ -248,3 +248,9 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .coffee-modal .coffee-cup { font-size: 34px; line-height: 1; margin: 4px 0 8px; }
 .coffee-modal p { margin: 0; }
 .coffee-modal .modal-actions { justify-content: center; }
+
+/* Layout presets: one shared group at the far right of the tab strip, for the active Workspace. */
+.layout-presets { flex: none; align-self: center; display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: #dcdcdf; }
+.layout-btn { width: 28px; height: 24px; display: grid; place-items: center; border: none; border-radius: 6px; background: transparent; color: var(--chrome-muted); cursor: pointer; }
+.layout-btn:hover { color: var(--chrome-text); background: #e8e8ea; }
+.layout-btn.selected { background: var(--chrome-topbar); color: var(--accent); box-shadow: 0 0 0 1px var(--chrome-border); }

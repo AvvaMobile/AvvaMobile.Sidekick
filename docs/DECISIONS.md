@@ -185,7 +185,7 @@ M0 regression: the spike's right panel received every ChatGPT navigation/permiss
 ## D023 - Resizable split, persisted per Workspace
 
 Decision:
-A draggable vertical splitter separates the ChatGPT and development columns. Minimum widths: ChatGPT 360 px, development pane 320 px, splitter 6 px. The split ratio is stored per Workspace (`WorkspaceUiState.splitRatio`) and restored when that Workspace is selected.
+A draggable vertical splitter separates the ChatGPT and development columns. Minimum widths: ChatGPT 360 px, development pane 320 px, splitter 6 px. The split ratio is stored per Workspace (`WorkspaceUiState.splitRatio`) and restored when that Workspace is selected. Five layout presets (Terminal only, GPT 20/80, 50/50, 80/20, GPT only) sit at the right end of the tab strip and act on the window's active Workspace; the mode is stored per Workspace (`WorkspaceUiState.layoutMode`, absent in older records = `custom`, so saved ratios keep working). Presets are ratios clamped to the minimum widths; dragging the splitter switches the Workspace to `custom`. Hidden panes are only hidden (ChatGPT view `setVisible(false)`, terminal frame `visibility:hidden` at its normal size), never destroyed or resized to zero.
 
 Geometry is computed by one pure module (`src/domain/layout/splitPane.ts`) used by both the renderer and the main process. During a drag the renderer updates its own layout immediately and sends at most one fire-and-forget ratio update per animation frame; the main process only calls `setBounds` on the existing ChatGPT WebContentsView. The ratio is persisted on drag end only.
 

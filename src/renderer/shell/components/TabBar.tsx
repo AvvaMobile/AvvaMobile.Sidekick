@@ -1,5 +1,29 @@
 import { useRef, useState } from 'react';
+import { PRESET_MODES, type LayoutMode } from '../../../domain/layout/splitPane';
 import type { WorkspaceView } from '../../../shared/state';
+
+const PRESET_TITLES: Record<(typeof PRESET_MODES)[number], string> = {
+  'gpt-hidden': 'Terminal only',
+  'split-20-80': 'GPT 20 / Terminal 80',
+  'split-50-50': 'GPT 50 / Terminal 50',
+  'split-80-20': 'GPT 80 / Terminal 20',
+  'terminal-hidden': 'GPT only',
+};
+
+/** Left-pane share drawn in the icon (ChatGPT left, terminal right). */
+const ICON_SPLIT: Record<(typeof PRESET_MODES)[number], number> = { 'gpt-hidden': 0, 'split-20-80': 0.2, 'split-50-50': 0.5, 'split-80-20': 0.8, 'terminal-hidden': 1 };
+
+function LayoutIcon({ mode }: { mode: (typeof PRESET_MODES)[number] }) {
+  const inner = 12;
+  const left = Math.round(inner * ICON_SPLIT[mode]);
+  return (
+    <svg width="18" height="14" viewBox="0 0 18 14" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="17" height="13" rx="2" fill="none" stroke="currentColor" opacity=".55" />
+      {left > 0 && <rect x="3" y="3" width={left} height="8" rx="1" fill="currentColor" opacity=".35" />}
+      {left < inner && <rect x={3 + left} y="3" width={inner - left} height="8" rx="1" fill="currentColor" />}
+    </svg>
+  );
+}
 
 interface Props {
   workspaces: WorkspaceView[];
@@ -17,6 +41,9 @@ interface Props {
   startOpen: boolean;
   onSelectStart(): void;
   onCloseStart(): void;
+  /** Layout of the active Workspace; null hides the preset buttons (start page, settings). */
+  layoutMode: LayoutMode | null;
+  onLayout(mode: LayoutMode): void;
 }
 
 function stateOf(ws: WorkspaceView): { cls: string; title: string } {
@@ -58,7 +85,7 @@ export function shiftFor(index: number, from: number, to: number, slot: number):
  * Browser-style project tab strip (replaces the Slack-style sidebar, D016). Tabs are reordered by
  * dragging: the other tabs slide out of the way (animated), the dragged tab settles on release.
  */
-export function TabBar({ workspaces, activeId, onSelect, onReorder, onContextMenu, onNew, onClose, startOpen, onSelectStart, onCloseStart }: Props) {
+export function TabBar({ workspaces, activeId, onSelect, onReorder, onContextMenu, onNew, onClose, startOpen, onSelectStart, onCloseStart, layoutMode, onLayout }: Props) {
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const update = (d: Drag | null) => {
@@ -168,6 +195,15 @@ export function TabBar({ workspaces, activeId, onSelect, onReorder, onContextMen
           </button>
         </div>
       </nav>
+      {layoutMode && (
+        <div className="layout-presets" role="group" aria-label="Pane layout">
+          {PRESET_MODES.map((m) => (
+            <button key={m} className={`layout-btn ${layoutMode === m ? 'selected' : ''}`} title={PRESET_TITLES[m]} aria-label={PRESET_TITLES[m]} aria-pressed={layoutMode === m} onClick={() => onLayout(m)}>
+              <LayoutIcon mode={m} />
+            </button>
+          ))}
+        </div>
+      )}
     </header>
   );
 }
