@@ -37,7 +37,7 @@ describe('canonical workflow (D040)', () => {
       expect(text, p).not.toMatch(/diag:(insert|submit|state|home)|ResponseCopier|response:(copy|info)|copyResponse|developerMode|SIDEKICK_DEVELOPER/);
     }
     const users = (needle: string) =>
-      all.filter(({ p, text }) => text.includes(needle) && !p.endsWith('ChatGPTAdapter.ts')).map(({ p }) => p.replace(/^.*\/src\//, ''));
+      all.filter(({ p, text }) => text.includes(needle) && !p.endsWith('ChatGPTAdapter.ts')).map(({ p }) => p.replace(/\\/g, '/').replace(/^.*\/src\//, ''));
     // The ChatGPT composer is written to only by the orchestrator's automatic handback.
     expect(users('.insertComposerText(')).toEqual(['main/app/WorkspaceOrchestrator.ts']);
     expect(users('.submitComposer(')).toEqual(['main/app/WorkspaceOrchestrator.ts']);
