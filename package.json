@@ -1,7 +1,7 @@
 {
   "name": "avvamobile.sidekick",
   "productName": "Avva Mobile Sidekick",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Desktop app that pairs a ChatGPT conversation with Claude Code: plan with ChatGPT, hand prompts to Claude in one click, send results back for review.",
   "main": "out/main/index.js",
