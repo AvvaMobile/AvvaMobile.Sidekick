@@ -213,20 +213,6 @@ describe('SplitLayoutController', () => {
       expect(a.setVisible).toHaveBeenLastCalledWith(false);
     });
 
-    it('the relay buttons only exist on the Split divider', () => {
-      const seen: unknown[] = [];
-      const c = new SplitLayoutController(store, () => area, (g) => seen.push(g));
-      c.register('a', fakeView());
-      c.activate('a');
-      expect(seen.at(-1)).not.toBeNull();
-      c.setViewMode('chatgpt-focus');
-      expect(seen.at(-1)).toBeNull();
-      c.setViewMode('claude-focus');
-      expect(seen.at(-1)).toBeNull();
-      c.setViewMode('split');
-      expect(seen.at(-1)).not.toBeNull();
-    });
-
     it('rejects an unknown view', () => {
       const c = make();
       c.register('a', fakeView());

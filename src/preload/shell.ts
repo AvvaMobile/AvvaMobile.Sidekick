@@ -55,7 +55,7 @@ contextBridge.exposeInMainWorld('workspace', {
   responseInfo: (id: string) => ipcRenderer.invoke('response:info', str(id)),
   // target: 'auto' | 'full' | { block: n }; validated in the main process.
   copyResponse: (id: string, target: unknown) => ipcRenderer.invoke('response:copy', str(id), target),
-  sendReview: (id: string, taskId: string) => ipcRenderer.invoke('review:send', str(id), str(taskId)),
+  retryReview: (id: string, taskId: string) => ipcRenderer.invoke('review:retry', str(id), str(taskId)),
 
   terminalInput: (id: string, data: string) => ipcRenderer.send('terminal:input', { workspaceId: str(id), data: str(data) }),
   terminalResize: (id: string, cols: number, rows: number) =>

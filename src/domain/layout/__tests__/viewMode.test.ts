@@ -18,7 +18,6 @@ describe('views', () => {
     expect(v.splitter).toEqual(g.splitter);
     expect(v.devPane).toEqual(g.devPane);
     expect(v.devPaneVisible).toBe(true);
-    expect(v.divider).toEqual(g);
     expect(v.statusBar).toBeNull();
   });
 
@@ -29,7 +28,6 @@ describe('views', () => {
     expect(v.devPaneVisible).toBe(false);
     expect(v.devPane.width).toBeGreaterThan(300);
     expect(v.splitter).toBeNull();
-    expect(v.divider).toBeNull();
   });
 
   it('Claude Focus gives the terminal the whole area and hides ChatGPT', () => {
@@ -39,7 +37,6 @@ describe('views', () => {
     expect(v.devPaneVisible).toBe(true);
     expect(v.splitter).toBeNull();
     expect(v.statusBar).toBeNull();
-    expect(v.divider).toBeNull();
   });
 
   it('old layout presets map to a view and a ratio', () => {

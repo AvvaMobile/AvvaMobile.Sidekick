@@ -264,7 +264,9 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .status-bar { position: absolute; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--pane); border-top: 1px solid var(--border); font-size: 12.5px; overflow: hidden; z-index: 3; }
 .status-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .status-dot.running { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
-.status-dot.result-ready { background: var(--ok); }
+.status-dot.delivered { background: var(--ok); }
+.status-dot.sending { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.status-dot.delivery-failed { background: var(--err); }
 .status-dot.failed { background: var(--err); }
 .status-label { white-space: nowrap; }
 .status-hint { color: var(--muted); white-space: nowrap; }

@@ -37,7 +37,8 @@ export interface WorkspaceApi {
   cancelAutoSend(id: string): Promise<Result>;
   cancelTask(id: string): Promise<Result>;
   resetSession(id: string): Promise<Result>;
-  sendReview(id: string, taskId: string): Promise<Result>;
+  /** Retries delivering the stored result to ChatGPT after an automatic delivery failed (never re-runs Claude). */
+  retryReview(id: string, taskId: string): Promise<Result>;
   /** Code blocks of Claude's last completed response (for the Copy menu). */
   responseInfo(id: string): Promise<{ available: boolean; blocks: BlockInfo[] }>;
   /** Copies part of Claude's last response to the clipboard; `code: 'choose'` lists the blocks to pick from. */

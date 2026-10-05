@@ -127,7 +127,7 @@ export interface ToastMessage {
 /** Support link (Help menu and the one-time popup). Opened by main only; the renderer never passes a URL. */
 export const BUY_ME_A_COFFEE_URL = 'https://buymeacoffee.com/muratyilmaz';
 
-export type ShellCommand = 'send-to-claude' | 'send-review' | 'coffee-prompt' | 'setup-prompt' | 'new-workspace' | 'projects-opened' | 'fullscreen-enter' | 'fullscreen-leave';
+export type ShellCommand = 'send-to-claude' | 'coffee-prompt' | 'setup-prompt' | 'new-workspace' | 'projects-opened' | 'fullscreen-enter' | 'fullscreen-leave';
 
 /** Fixed IPC channel names for the shell preload (no generic channel access). */
 export const SHELL_CHANNELS = {

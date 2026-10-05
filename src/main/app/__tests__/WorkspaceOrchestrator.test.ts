@@ -11,7 +11,10 @@ import { DEFAULT_PROMPT_SUFFIX } from '../../../domain/handoff/promptSuffix';
 import { AppStateStore } from '../AppStateStore';
 import { WorkspaceOrchestrator, type TaskFinishedNotice } from '../WorkspaceOrchestrator';
 
-const flush = () => new Promise((r) => setTimeout(r, 0));
+/** Lets pending work (incl. an automatic handback that waits on 0 ms timers) run to its end. */
+const flush = async () => {
+  for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
+};
 
 function record(id: string, projectPath: string, extra: Partial<WorkspaceRecord> = {}): WorkspaceRecord {
   return {
@@ -42,10 +45,23 @@ function fakeChat(block: () => AdapterResult<ClaudePromptCandidate>) {
     submitted: 0,
     /** The user's latest ChatGPT message (auto-send trigger detection). */
     userMessage: 'Write a prompt for the login screen.',
+    /** The conversation the ChatGPT view shows right now, and whether it can be navigated back to another one. */
+    currentUrl: 'https://chatgpt.com/c/x' as string,
+    canRestore: true,
+    /** Conversation each insert landed in. */
+    insertedAt: [] as string[],
+    ensureConversation: vi.fn(async (url: string | null): Promise<AdapterResult<{ restored: boolean }>> => {
+      if (!url) return { ok: false, code: 'conversation_unavailable', detail: 'unknown' };
+      if (url === chat.currentUrl) return { ok: true, value: { restored: false } };
+      if (!chat.canRestore) return { ok: false, code: 'conversation_unavailable', detail: 'gone' };
+      chat.currentUrl = url;
+      return { ok: true, value: { restored: true } };
+    }),
     getLatestClaudePromptBlock: vi.fn(async () => block()),
     getLatestUserMessage: vi.fn(async (): Promise<AdapterResult<{ text: string; messageId: string | null }>> => ({ ok: true, value: { text: chat.userMessage, messageId: 'u-1' } })),
     insertComposerText: vi.fn(async (text: string): Promise<AdapterResult<{ inserted: number }>> => {
       chat.inserted.push(text);
+      chat.insertedAt.push(chat.currentUrl);
       return { ok: true, value: { inserted: text.length } };
     }),
     submitComposer: vi.fn(async (): Promise<AdapterResult<{ via: string }>> => {
@@ -109,6 +125,7 @@ describe('WorkspaceOrchestrator', () => {
       isForeground: (id) => id === foreground,
       notifyTaskFinished: (n) => notices.push(n),
       onChange: () => {},
+      handbackWait: { intervalMs: 0, maxWaits: 1 },
       newId: () => `id-${++n}`,
     });
     orch.register('a');
@@ -121,6 +138,15 @@ describe('WorkspaceOrchestrator', () => {
     orch.observeCandidate(ws, res);
     orch.observeCandidate(ws, res);
   }
+
+  /** ChatGPT refuses the handback (message box has a draft that never clears). */
+  const failDelivery = (ws: string) => chats[ws]!.insertComposerText.mockResolvedValue({ ok: false, code: 'composer_not_empty', detail: '' });
+  const allowDelivery = (ws: string) =>
+    chats[ws]!.insertComposerText.mockImplementation(async (text: string) => {
+      chats[ws]!.inserted.push(text);
+      chats[ws]!.insertedAt.push(chats[ws]!.currentUrl);
+      return { ok: true, value: { inserted: text.length } };
+    });
 
   async function startTask(ws: string): Promise<ClaudeRunRequest> {
     const res = await orch.sendToClaude(ws, 'button');
@@ -232,59 +258,177 @@ describe('WorkspaceOrchestrator', () => {
     expect(orch.view('a')!.task!.status).toBe('running');
     complete(req);
     await flush();
-    expect(orch.view('a')!.task!.status).toBe('review_pending');
+    expect(orch.view('a')!.task!.status).toBe('review_sent');
   });
 
-  it('completion builds a review packet, marks review_pending and notifies — but never sends to ChatGPT by itself', async () => {
+  it('completion builds the review packet and hands it to ChatGPT by itself — no click', async () => {
     foreground = 'b'; // a finishes in the background
     const req = await startTask('a');
     complete(req, 'Implemented X');
     await flush();
     const view = orch.view('a')!;
-    expect(view.task!.status).toBe('review_pending');
+    expect(view.task!.status).toBe('review_sent');
     expect(view.task!.outcome).toBe('succeeded');
+    expect(view.task!.review).toMatchObject({ status: 'sent', lastError: null });
     expect(view.task!.review!.body).toContain('Implemented X');
     expect(view.task!.review!.body).toContain('M src/x.ts');
-    expect(view.attention).toBe('completed');
+    expect(chats.a!.inserted).toHaveLength(1);
+    expect(chats.a!.inserted[0]).toContain('M src/x.ts');
+    expect(chats.a!.submitted).toBe(1);
+    expect(view.latestReview).toBeNull();
+    expect(view.attention).toBe('none');
     expect(notices).toEqual([expect.objectContaining({ workspaceId: 'a', background: true, kind: 'success' })]);
-    expect(chats.a!.insertComposerText).not.toHaveBeenCalled();
-    expect(chats.a!.submitComposer).not.toHaveBeenCalled();
-    expect(orch.attentionCount()).toBe(1);
-    orch.activate('a');
-    expect(orch.view('a')!.attention).toBe('none');
+    expect(runs).toHaveLength(1);
   });
 
-  it('review handback happens only on explicit approval, into the owning Workspace conversation', async () => {
+  it('the result goes only to the originating Workspace and its source conversation', async () => {
+    const reqA = await startTask('a');
+    const reqB = await startTask('b');
+    complete(reqA, 'Result A');
+    await flush();
+    expect(chats.a!.inserted).toHaveLength(1);
+    expect(chats.a!.inserted[0]).toContain('Result A');
+    expect(chats.b!.inserted).toHaveLength(0);
+    complete(reqB, 'Result B');
+    await flush();
+    expect(chats.b!.inserted).toHaveLength(1);
+    expect(chats.b!.inserted[0]).toContain('Result B');
+    expect(chats.a!.inserted).toHaveLength(1);
+  });
+
+  it('after the user moved to another conversation, the source conversation is restored first; the result never lands in the visible one', async () => {
+    const req = await startTask('a'); // started from https://chatgpt.com/c/x
+    chats.a!.currentUrl = 'https://chatgpt.com/c/other';
+    complete(req, 'Result A');
+    await flush();
+    expect(chats.a!.ensureConversation).toHaveBeenCalledWith('https://chatgpt.com/c/x');
+    expect(chats.a!.insertedAt).toEqual(['https://chatgpt.com/c/x']);
+    expect(orch.view('a')!.task!.status).toBe('review_sent');
+  });
+
+  it('an unrestorable source conversation fails safely: nothing inserted, packet kept, Retry offered', async () => {
+    const req = await startTask('a');
+    chats.a!.currentUrl = 'https://chatgpt.com/c/other';
+    chats.a!.canRestore = false;
+    complete(req, 'Result A');
+    await flush();
+    expect(chats.a!.inserted).toHaveLength(0);
+    expect(chats.a!.submitted).toBe(0);
+    const v = orch.view('a')!;
+    expect(v.task!.status).toBe('review_pending');
+    expect(v.latestReview).toMatchObject({ status: 'failed', lastError: expect.stringContaining('conversation') });
+    expect(v.latestReview!.body).toContain('Result A');
+    expect(runs).toHaveLength(1);
+    // Retry: the conversation is reachable again.
+    chats.a!.canRestore = true;
+    expect((await orch.retryReview('a', v.latestReview!.taskId)).ok).toBe(true);
+    expect(chats.a!.insertedAt).toEqual(['https://chatgpt.com/c/x']);
+    expect(orch.view('a')!.task!.status).toBe('review_sent');
+    expect(runs).toHaveLength(1);
+  });
+
+  it('a task without a known source conversation is never delivered to a guess', async () => {
+    blocks.a = { ok: true, value: { text: 'P', messageId: 'm1', conversationUrl: null, truncated: false, capturedAt: '' } };
     const req = await startTask('a');
     complete(req);
     await flush();
-    const taskId = orch.view('a')!.task!.id;
-    expect((await orch.sendReview('b', taskId)).ok).toBe(false);
-    expect(chats.b!.insertComposerText).not.toHaveBeenCalled();
-    const r = await orch.sendReview('a', taskId);
-    expect(r.ok).toBe(true);
-    expect(chats.a!.inserted).toHaveLength(1);
+    expect(chats.a!.inserted).toHaveLength(0);
+    expect(orch.view('a')!.latestReview!.status).toBe('failed');
+  });
+
+  it('the user keeps chatting while Claude runs: the handback waits for the reply to finish, then goes through', async () => {
+    const req = await startTask('a');
+    orch.observeCandidate('a', { ok: false, code: 'still_generating', detail: '' });
+    complete(req, 'Result A');
+    orch.observeCandidate('a', ok('the reply', 'msg-9')); // ChatGPT finishes while the handback waits
+    await flush();
     expect(chats.a!.submitted).toBe(1);
     expect(orch.view('a')!.task!.status).toBe('review_sent');
-    expect((await orch.sendReview('a', taskId)).ok).toBe(false);
+  });
+
+  it('if ChatGPT never stops replying the result is kept with a Retry, not lost', async () => {
+    const req = await startTask('a');
+    orch.observeCandidate('a', { ok: false, code: 'still_generating', detail: '' });
+    complete(req, 'Result A');
+    await flush();
+    expect(chats.a!.inserted).toHaveLength(0);
+    expect(orch.view('a')!.latestReview).toMatchObject({ status: 'failed', lastError: expect.stringContaining('still responding') });
+    orch.observeCandidate('a', ok('reply', 'msg-9'));
+    expect((await orch.retryReview('a', orch.view('a')!.latestReview!.taskId)).ok).toBe(true);
     expect(chats.a!.submitted).toBe(1);
   });
 
-  it('failed handback keeps review_pending, allows retry and never re-runs Claude', async () => {
+  it('a draft the user is typing is never overwritten; it waits, then fails and keeps the packet', async () => {
+    failDelivery('a');
+    const req = await startTask('a');
+    complete(req, 'Result A');
+    await flush();
+    expect(chats.a!.insertComposerText.mock.calls.length).toBeGreaterThan(1); // waited and tried again
+    expect(chats.a!.submitted).toBe(0);
+    expect(orch.view('a')!.task!.review).toMatchObject({ status: 'failed', lastError: expect.stringContaining('message box') });
+  });
+
+  it('failed handback keeps the packet; Retry delivers only the stored result and never re-runs Claude', async () => {
+    failDelivery('a');
+    const req = await startTask('a');
+    complete(req);
+    await flush();
+    const v = orch.view('a')!;
+    expect(v.task!.status).toBe('review_pending');
+    expect(v.task!.review).toMatchObject({ status: 'failed', lastError: expect.any(String) });
+    expect(runs).toHaveLength(1);
+    expect(store.get().tasks).toHaveLength(1);
+    allowDelivery('a');
+    const r2 = await orch.retryReview('a', v.latestReview!.taskId);
+    expect(r2.ok).toBe(true);
+    expect(orch.view('a')!.task!.review).toMatchObject({ status: 'sent', lastError: null });
+    expect(chats.a!.inserted[0]).toContain(v.latestReview!.body);
+    expect(runs).toHaveLength(1);
+    expect(store.get().tasks).toHaveLength(1);
+  });
+
+  it('Retry only exists for a failed delivery', async () => {
     const req = await startTask('a');
     complete(req);
     await flush();
     const taskId = orch.view('a')!.task!.id;
-    chats.a!.insertComposerText.mockResolvedValueOnce({ ok: false, code: 'composer_not_empty', detail: '' });
-    const r1 = await orch.sendReview('a', taskId);
-    expect(r1.ok).toBe(false);
-    expect(orch.view('a')!.task!.status).toBe('review_pending');
-    expect(orch.view('a')!.task!.review).toMatchObject({ status: 'failed', lastError: expect.any(String) });
-    expect(runs).toHaveLength(1);
-    const r2 = await orch.sendReview('a', taskId);
-    expect(r2.ok).toBe(true);
-    expect(orch.view('a')!.task!.review).toMatchObject({ status: 'sent', lastError: null });
-    expect(runs).toHaveLength(1);
+    expect(await orch.retryReview('a', taskId)).toMatchObject({ ok: false, code: 'not_failed' });
+    expect(await orch.retryReview('b', taskId)).toMatchObject({ ok: false, code: 'unknown_task' });
+    expect(chats.a!.submitted).toBe(1);
+  });
+
+  it('a failed or cancelled Claude task is not handed back automatically', async () => {
+    const req = await startTask('a');
+    req.onExit({ code: 1, signal: null, spawnError: null });
+    await flush();
+    expect(orch.view('a')!.task!.outcome).toBe('failed');
+    expect(chats.a!.inserted).toHaveLength(0);
+  });
+
+  it("the user's own (manual) Claude turns are never handed back to ChatGPT", async () => {
+    orch.observeClaudeStop('a');
+    orch.observeClaudeStop('a');
+    await flush();
+    expect(chats.a!.inserted).toHaveLength(0);
+    expect(chats.a!.submitted).toBe(0);
+    expect(orch.view('a')!.task).toBeNull();
+  });
+
+  it('a delivery cut short by quitting the app is kept as failed so Retry appears after the restart', async () => {
+    const req = await startTask('a');
+    complete(req, 'Result A');
+    await flush();
+    const taskId = orch.view('a')!.task!.id;
+    // Simulate a quit before the packet was sent: back to pending.
+    const task = store.task(taskId)!;
+    const packet = store.reviewPacket(task.reviewPacketId)!;
+    packet.deliveryStatus = 'pending';
+    store.putReviewPacket(packet);
+    (task as { status: string }).status = 'review_pending';
+    store.putTask(task);
+    orch.unregister('a');
+    orch.register('a');
+    expect(orch.view('a')!.latestReview).toMatchObject({ status: 'failed', lastError: expect.stringContaining('interrupted') });
   });
 
   it('a process exit without a result event is a failure (terminal idleness is never completion)', async () => {
@@ -326,7 +470,7 @@ describe('WorkspaceOrchestrator', () => {
       complete(req, 'Result A');
       await flush();
       expect(orch.activeTaskWorkspaceIds()).toEqual([]);
-      expect(orch.view('a')!.latestReview!.body).toContain('Result A');
+      expect(orch.view('a')!.task!.review!.body).toContain('Result A');
     });
 
     it('a user interrupt (runner reports cancelled) finalizes the task as cancelled — no stale running state', async () => {
@@ -361,7 +505,8 @@ describe('WorkspaceOrchestrator', () => {
       expect(orch.activeTaskWorkspaceIds()).toEqual([]);
     });
 
-    it('the previous completed result stays available while a later task runs, and the new one replaces it when it completes', async () => {
+    it('an undelivered result stays available while a later task runs, and the new one replaces it when it completes', async () => {
+      failDelivery('a');
       const a1 = await startTask('a');
       complete(a1, 'Result A');
       await flush();
@@ -371,14 +516,15 @@ describe('WorkspaceOrchestrator', () => {
       const a2 = await startTask('a');
       const during = orch.view('a')!;
       expect(during.task!.status).toBe('running');
-      expect(during.latestReview).toMatchObject({ taskId: firstTask, status: 'pending' });
+      expect(during.latestReview).toMatchObject({ taskId: firstTask, status: 'failed' });
       expect(during.latestReview!.body).toContain('Result A');
       complete(a2, 'Result B');
       await flush();
       expect(orch.view('a')!.latestReview!.body).toContain('Result B');
     });
 
-    it('a cancelled later task does not replace an earlier completed result; it can be handed to ChatGPT meanwhile', async () => {
+    it('a cancelled later task does not replace an earlier undelivered result; it can be retried meanwhile', async () => {
+      failDelivery('a');
       const a1 = await startTask('a');
       complete(a1, 'Result A');
       await flush();
@@ -387,7 +533,8 @@ describe('WorkspaceOrchestrator', () => {
       seen('a', blocks.a);
       const a2 = await startTask('a');
       // hand the previous result over while the second task is still running
-      expect((await orch.sendReview('a', firstTask)).ok).toBe(true);
+      allowDelivery('a');
+      expect((await orch.retryReview('a', firstTask)).ok).toBe(true);
       expect(chats.a!.inserted[0]).toContain('Result A');
       cancelledExit(a2);
       await flush();
@@ -412,6 +559,8 @@ describe('WorkspaceOrchestrator', () => {
       complete(rb, 'Result B');
       await flush();
       expect(orch.view('a')!.latestReview!.body).not.toContain('Result B');
+      expect(chats.a!.inserted).toHaveLength(0);
+      expect(chats.b!.inserted).toHaveLength(1);
     });
   });
 
@@ -440,12 +589,11 @@ describe('WorkspaceOrchestrator', () => {
       store.setViewMode('a', 'claude-focus');
       complete(req, 'Built it');
       await flush();
-      expect(orch.view('a')!.latestReview!.taskId).toBe(taskId);
-      expect(chats.a!.submitComposer).not.toHaveBeenCalled(); // never automatic
+      expect(orch.view('a')!.task!.status).toBe('review_sent'); // delivered with the terminal hidden, no click
       store.setViewMode('a', 'chatgpt-focus');
-      expect((await orch.sendReview('a', taskId)).ok).toBe(true);
       expect(chats.a!.submitted).toBe(1);
       expect(chats.b!.submitted).toBe(0);
+      expect(runs).toHaveLength(1);
     });
 
     it('views and task state are per Workspace: A running in ChatGPT Focus, B in Claude Focus stays idle, then completes alone', async () => {
@@ -457,9 +605,10 @@ describe('WorkspaceOrchestrator', () => {
       expect([orch.view('a')!.viewMode, orch.view('b')!.viewMode]).toEqual(['chatgpt-focus', 'claude-focus']);
       complete(reqA);
       await flush();
-      expect(orch.view('a')!.latestReview).not.toBeNull();
+      expect(orch.view('a')!.task!.status).toBe('review_sent');
       expect(orch.view('b')!.latestReview).toBeNull();
       expect(orch.view('b')!.task).toBeNull();
+      expect(chats.b!.inserted).toHaveLength(0);
     });
   });
 
@@ -505,7 +654,6 @@ describe('WorkspaceOrchestrator', () => {
       const req = await startTask('a');
       complete(req);
       await flush();
-      await orch.sendReview('a', orch.view('a')!.task!.id);
       expect(kinds('a')).toEqual(['prompt_ready', 'sent_to_claude', 'claude_finished', 'review_sent']);
       expect(store.workspace('a')!.flowLog![0]!.detail).toBe('Line one');
     });
@@ -548,11 +696,10 @@ describe('WorkspaceOrchestrator', () => {
     });
 
     it('a failed handback is logged', async () => {
+      failDelivery('a');
       const req = await startTask('a');
       complete(req);
       await flush();
-      chats.a!.insertComposerText.mockResolvedValueOnce({ ok: false, code: 'composer_not_empty', detail: '' });
-      await orch.sendReview('a', orch.view('a')!.task!.id);
       expect(kinds('a').at(-1)).toBe('review_failed');
     });
   });
@@ -725,6 +872,28 @@ describe('WorkspaceOrchestrator', () => {
       expect(runs).toHaveLength(1);
       expect(runs[0]!.prompt).toBe('Prompt for A');
       expect(orch.view('a')!.task!.status).toBe('running');
+    });
+
+    it('whole flow, no click: request -> countdown -> Claude (terminal hidden) -> Project B visited -> result lands in A\'s conversation only', async () => {
+      store.setViewMode('a', 'chatgpt-focus');
+      await userSays('a', 'şimdi bunu claude gönder', 'u-2');
+      await tick(3_000);
+      expect(runs).toHaveLength(1);
+      // The user chats on, switches to Project B and moves A to another conversation meanwhile.
+      foreground = 'b';
+      store.setViewMode('a', 'split'); // revealing the terminal changes nothing about the task
+      expect(runs).toHaveLength(1);
+      expect(cancels).toBe(0);
+      chats.a!.currentUrl = 'https://chatgpt.com/c/other';
+      complete(runs[0]!, 'Built the login screen');
+      await tick(0);
+      await tick(0);
+      expect(chats.a!.insertedAt).toEqual(['https://chatgpt.com/c/x']);
+      expect(chats.a!.inserted[0]).toContain('Built the login screen');
+      expect(chats.a!.submitted).toBe(1);
+      expect(chats.b!.inserted).toHaveLength(0);
+      expect(orch.view('a')!.task!.status).toBe('review_sent');
+      expect(runs).toHaveLength(1);
     });
 
     it('"send this to Claude" starts the countdown', async () => {
@@ -927,12 +1096,11 @@ describe('WorkspaceOrchestrator', () => {
       expect(pty.write.mock.calls.flat().join('')).not.toContain('Be brief.');
     });
 
-    it('Send to ChatGPT (review packet) carries no suffix', async () => {
+    it('the automatic review packet to ChatGPT carries no suffix', async () => {
       orch.setClaudePromptSuffix('SUFFIX-MARKER');
       const req = await startTask('a');
       complete(req);
       await flush();
-      await orch.sendReview('a', orch.view('a')!.task!.id);
       expect(chats.a!.inserted[0]).not.toContain('SUFFIX-MARKER');
     });
 

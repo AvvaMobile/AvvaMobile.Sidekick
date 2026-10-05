@@ -19,6 +19,8 @@ import type { AppStateStore } from './AppStateStore';
 export interface ChatPort extends PromptCandidateSource {
   insertComposerText(text: string, opts?: { allowNonEmpty?: boolean }): Promise<AdapterResult<{ inserted: number }>>;
   submitComposer(): Promise<AdapterResult<{ via: string }>>;
+  /** Makes sure the view shows the conversation a result belongs to (restoring it if the user moved on); never guesses. */
+  ensureConversation(url: string | null): Promise<AdapterResult<{ restored: boolean }>>;
   /** The user's latest ChatGPT message (read only to detect an explicit "send it to Claude", D034). */
   getLatestUserMessage(): Promise<AdapterResult<{ text: string; messageId: string | null }>>;
 }
@@ -56,6 +58,8 @@ export interface OrchestratorDeps {
   claudeBusy?(workspaceId: string): boolean;
   /** A managed task reached its final state (nothing is running for this Workspace any more). */
   taskSettled?(workspaceId: string): void;
+  /** Automatic handback: how long (ms) and how often to wait for ChatGPT to be free (replying / draft in the box). */
+  handbackWait?: { intervalMs: number; maxWaits: number };
   newId?: () => string;
   now?: () => Date;
 }
@@ -97,8 +101,8 @@ const AUTO_SEND_MAX_WAITS = 90;
 export type OpResult = { ok: true } | { ok: false; code: string; detail: string };
 
 /**
- * Per-Workspace orchestration: candidate prompt -> explicit Send to Claude -> managed run ->
- * evidence -> review packet -> user-approved handback (WORKFLOW §1, D005, D008, D024).
+ * Per-Workspace orchestration: candidate prompt -> explicit send intent -> managed run ->
+ * evidence -> review packet -> automatic handback to the originating conversation (WORKFLOW §1, D005, D024, D040).
  *
  * Every piece of state is keyed by workspaceId. Nothing here is driven by terminal/PTY activity,
  * and nothing here runs because ChatGPT produced output (the only automatic send is the user's own
@@ -119,6 +123,7 @@ export class WorkspaceOrchestrator {
   register(workspaceId: string): void {
     if (this.runtimes.has(workspaceId)) return;
     this.deps.panes.ensure(workspaceId);
+    this.failInterruptedDelivery(workspaceId);
     this.runtimes.set(workspaceId, {
       generating: false,
       loggedIn: null,
@@ -138,6 +143,16 @@ export class WorkspaceOrchestrator {
       notice: null,
       autoSend: null,
     });
+  }
+
+  /** A result whose automatic delivery was cut short by quitting the app: keep it and offer Retry. */
+  private failInterruptedDelivery(workspaceId: string): void {
+    const task = this.currentTask(workspaceId);
+    const packet = task?.status === 'review_pending' && task.outcome === 'succeeded' ? this.deps.store.reviewPacket(task.reviewPacketId) : undefined;
+    if (!packet || packet.deliveryStatus !== 'pending') return;
+    packet.deliveryStatus = 'failed';
+    packet.lastDeliveryError = 'Delivery to ChatGPT was interrupted.';
+    this.deps.store.putReviewPacket(packet);
   }
 
   unregister(workspaceId: string): void {
@@ -446,16 +461,41 @@ export class WorkspaceOrchestrator {
       taskId: task.id,
       kind: outcome === 'succeeded' ? 'success' : outcome === 'cancelled' ? 'info' : 'error',
       title: `${ws.name}: Claude ${outcome === 'succeeded' ? 'finished' : outcome}`,
-      body: outcome === 'succeeded' ? 'Review packet ready. Send it to ChatGPT?' : (task.error?.message ?? 'Review packet ready.'),
+      body: outcome === 'succeeded' ? 'Sending the result to ChatGPT…' : (task.error?.message ?? 'Review packet ready.'),
       background,
     });
     this.deps.onChange();
     this.deps.taskSettled?.(workspaceId);
+    // A managed task that succeeded goes back to the conversation it came from, without a click (D040).
+    if (outcome === 'succeeded')
+      void this.deliverReview(workspaceId, task.id).then((r) => {
+        if (r.ok || r.code !== 'in_progress') return;
+        // Another delivery of this Workspace was still running: keep the result and offer Retry.
+        const packet = this.deps.store.reviewPacket(task.reviewPacketId);
+        if (!packet) return;
+        packet.deliveryStatus = 'failed';
+        packet.lastDeliveryError = 'Another delivery was still in progress.';
+        this.deps.store.putReviewPacket(packet);
+        this.deps.onChange();
+      });
   }
 
-  // ---------- Review handback (user-approved only) ----------
+  // ---------- Review handback (automatic; Retry only after a failure) ----------
 
-  async sendReview(workspaceId: string, taskId: string): Promise<OpResult> {
+  /** Manual Retry of a failed delivery. Re-sends the stored packet; Claude is never re-run. */
+  async retryReview(workspaceId: string, taskId: string): Promise<OpResult> {
+    const task = this.deps.store.task(taskId);
+    const packet = task && this.deps.store.reviewPacket(task.reviewPacketId);
+    if (!task || task.workspaceId !== workspaceId || !packet) return { ok: false, code: 'unknown_task', detail: 'Task not found in this Workspace' };
+    if (packet.deliveryStatus !== 'failed') return { ok: false, code: 'not_failed', detail: 'Nothing to retry' };
+    return this.deliverReview(workspaceId, taskId);
+  }
+
+  /**
+   * Posts the task's review packet into the ChatGPT conversation the task started from (never into
+   * whatever is visible), waits while the user is chatting there, and keeps the packet on any failure.
+   */
+  private async deliverReview(workspaceId: string, taskId: string): Promise<OpResult> {
     const rt = this.runtimes.get(workspaceId);
     const task = this.deps.store.task(taskId);
     if (!rt || !task || task.workspaceId !== workspaceId) return { ok: false, code: 'unknown_task', detail: 'Task not found in this Workspace' };
@@ -463,30 +503,24 @@ export class WorkspaceOrchestrator {
     const packet = this.deps.store.reviewPacket(task.reviewPacketId);
     if (!packet) return { ok: false, code: 'no_packet', detail: 'Review packet missing' };
     if (rt.reviewSending) return { ok: false, code: 'in_progress', detail: 'Already sending' };
-    const chat = this.deps.chatFor(workspaceId);
     rt.reviewSending = true;
     packet.deliveryAttempts += 1;
     this.deps.onChange();
     try {
-      if (!chat) throw new HandbackError('ChatGPT is not available in this Workspace');
-      const ins = await chat.insertComposerText(packet.body);
-      if (!ins.ok)
-        throw new HandbackError(
-          ins.code === 'composer_not_empty' ? 'The ChatGPT message box already has text. Clear it, then retry.' : `Could not insert into ChatGPT (${ins.code})`,
-        );
-      const sub = await chat.submitComposer();
-      if (!sub.ok) throw new HandbackError(sub.code === 'still_generating' ? 'ChatGPT is still responding. Retry when it finishes.' : `Could not submit to ChatGPT (${sub.code})`);
+      await this.postToSourceConversation(workspaceId, rt, task, packet.body);
       packet.deliveryStatus = 'sent';
       packet.lastDeliveryError = null;
       transition(task, 'review_sent');
       rt.attention = 'none';
-      this.flow(workspaceId, 'review_sent', 'Review sent to ChatGPT');
+      this.flow(workspaceId, 'review_sent', 'Result sent to ChatGPT');
       return { ok: true };
     } catch (err) {
       packet.deliveryStatus = 'failed';
       packet.lastDeliveryError = err instanceof HandbackError ? err.message : 'Unexpected error while sending to ChatGPT';
       // Task stays review_pending; Claude is never re-run.
       this.flow(workspaceId, 'review_failed', packet.lastDeliveryError);
+      const ws = this.deps.store.workspace(workspaceId);
+      if (ws) this.nudge(workspaceId, ws.name, 'Result delivery failed', packet.lastDeliveryError);
       return { ok: false, code: 'handback_failed', detail: packet.lastDeliveryError };
     } finally {
       rt.reviewSending = false;
@@ -494,6 +528,38 @@ export class WorkspaceOrchestrator {
       this.deps.store.putTask(task);
       this.deps.onChange();
     }
+  }
+
+  private async postToSourceConversation(workspaceId: string, rt: Runtime, task: TaskRecord, body: string): Promise<void> {
+    const wait = this.deps.handbackWait ?? { intervalMs: 2_000, maxWaits: 90 };
+    const stillHere = () => this.runtimes.get(workspaceId) === rt;
+    const sleep = () => new Promise<void>((r) => setTimeout(r, wait.intervalMs));
+    const chat = () => {
+      if (!stillHere()) throw new HandbackError('The project was closed');
+      const c = this.deps.chatFor(workspaceId);
+      if (!c) throw new HandbackError('ChatGPT is not available in this Workspace');
+      return c;
+    };
+    // The user may be chatting right now: let ChatGPT finish its reply first.
+    for (let i = 0; rt.generating && i < wait.maxWaits; i++) await sleep();
+    if (rt.generating) throw new HandbackError('ChatGPT is still responding. Retry when it finishes.');
+    const conv = await chat().ensureConversation(task.sourceConversationUrl);
+    if (!conv.ok)
+      throw new HandbackError(
+        conv.code === 'conversation_unavailable' ? 'Could not open the ChatGPT conversation this task came from.' : `ChatGPT is not ready (${conv.code})`,
+      );
+    for (let i = 0; ; i++) {
+      const ins = await chat().insertComposerText(body);
+      if (ins.ok) break;
+      // A draft in the message box is the user's: wait for them to send it, never overwrite it.
+      if (ins.code === 'composer_not_empty' && i < wait.maxWaits) {
+        await sleep();
+        continue;
+      }
+      throw new HandbackError(ins.code === 'composer_not_empty' ? 'The ChatGPT message box has text. Clear it, then retry.' : `Could not insert into ChatGPT (${ins.code})`);
+    }
+    const sub = await chat().submitComposer();
+    if (!sub.ok) throw new HandbackError(sub.code === 'still_generating' ? 'ChatGPT is still responding. Retry when it finishes.' : `Could not submit to ChatGPT (${sub.code})`);
   }
 
   // ---------- Selection / views ----------
@@ -596,7 +662,7 @@ export class WorkspaceOrchestrator {
     const rt = this.runtimes.get(workspaceId);
     if (!ws || !rt || rt.sending || rt.run || isTaskActive(this.currentTask(workspaceId))) return;
     this.flow(workspaceId, 'claude_finished', 'Claude finished (your own run)');
-    this.nudge(workspaceId, ws.name, 'Claude finished', 'ChatGPT has not heard back yet.');
+    this.nudge(workspaceId, ws.name, 'Claude finished', 'Your own run: not sent to ChatGPT.');
   }
 
   private promptReady(workspaceId: string, text: string, messageId: string | null): void {

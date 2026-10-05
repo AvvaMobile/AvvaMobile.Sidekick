@@ -31,7 +31,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
 });
-const props = () => ({ busy: false, style: {}, onSend: vi.fn(), onSendReview: vi.fn(), onStop: vi.fn(), onCancelAutoSend: vi.fn(), onOpenClaude: vi.fn() });
+const props = () => ({ busy: false, style: {}, onSend: vi.fn(), onRetry: vi.fn(), onStop: vi.fn(), onCancelAutoSend: vi.fn(), onOpenClaude: vi.fn() });
 const render = (active: WorkspaceView, p = props()) => {
   act(() => root.render(<ClaudeStatusBar active={active} {...p} />));
   return p;
@@ -45,9 +45,11 @@ describe('claudeStatus', () => {
     expect(claudeStatus(ws('a'))).toBe('idle');
     expect(claudeStatus(ws('a', { task: task('running') }))).toBe('running');
     expect(claudeStatus(ws('a', { task: task('queued') }))).toBe('running');
-    expect(claudeStatus(ws('a', { task: task('review_pending', { outcome: 'succeeded' }), latestReview: review }))).toBe('result-ready');
+    expect(claudeStatus(ws('a', { task: task('review_pending', { outcome: 'succeeded' }), latestReview: review }))).toBe('sending');
+    expect(claudeStatus(ws('a', { task: task('review_pending', { outcome: 'succeeded' }), latestReview: { ...review, status: 'sending' } }))).toBe('sending');
+    expect(claudeStatus(ws('a', { task: task('review_sent', { outcome: 'succeeded' }) }))).toBe('delivered');
+    expect(claudeStatus(ws('a', { task: task('review_pending', { outcome: 'succeeded' }), latestReview: { ...review, status: 'failed', lastError: 'x' } }))).toBe('delivery-failed');
     expect(claudeStatus(ws('a', { task: task('review_pending', { outcome: 'failed' }), latestReview: review }))).toBe('failed');
-    // A later task running does not hide the earlier result's owner state: Running wins while it runs.
     expect(claudeStatus(ws('a', { task: task('running', { id: 't2' }), latestReview: review }))).toBe('running');
   });
 });
@@ -77,22 +79,28 @@ describe('ChatGPT Focus status bar', () => {
     expect(p.onStop).toHaveBeenCalled();
   });
 
-  it('Result ready offers Send to ChatGPT (never automatic)', () => {
-    const p = render(ws('a', { task: task('review_pending', { outcome: 'succeeded' }), latestReview: review }));
-    expect(status()).toBe('Claude: Result ready');
-    expect(p.onSendReview).not.toHaveBeenCalled();
-    act(() => button('Send to ChatGPT')!.click());
-    expect(p.onSendReview).toHaveBeenCalledTimes(1);
+  it('a completed task shows its automatic delivery, with no Send to ChatGPT or Retry button', () => {
+    render(ws('a', { task: task('review_pending', { outcome: 'succeeded' }), latestReview: review }));
+    expect(status()).toBe('Claude: Completed — sending result to ChatGPT…');
+    expect(labels()).not.toContain('Send to ChatGPT');
+    expect(labels()).not.toContain('Retry');
+    act(() => root.render(<ClaudeStatusBar active={ws('a', { task: task('review_sent', { outcome: 'succeeded' }) })} {...props()} />));
+    expect(status()).toBe('Claude: Result delivered');
+    expect(labels()).not.toContain('Send to ChatGPT');
   });
 
-  it('a result that is being sent cannot be sent twice', () => {
-    render(ws('a', { task: task('review_pending'), latestReview: { ...review, status: 'sending' } }));
-    expect(button('Send to ChatGPT')!.disabled).toBe(true);
+  it('only a failed delivery offers Retry, which retries delivery and nothing else', () => {
+    const p = render(ws('a', { task: task('review_pending', { outcome: 'succeeded' }), latestReview: { ...review, status: 'failed', lastError: 'no conversation' } }));
+    expect(status()).toBe('Claude: Result delivery failed');
+    expect(labels()).toEqual(['Retry', 'Send to Claude', 'Open Claude']);
+    act(() => button('Retry')!.click());
+    expect(p.onRetry).toHaveBeenCalledTimes(1);
+    expect(p.onSend).not.toHaveBeenCalled();
   });
 
-  it('Failed still offers the result for review', () => {
+  it('a failed Claude task shows Failed without a send-back button', () => {
     render(ws('a', { task: task('review_pending', { outcome: 'failed' }), latestReview: review }));
-    expect(status()).toBe('Claude: Failed — result ready');
-    expect(labels()).toContain('Send to ChatGPT');
+    expect(status()).toBe('Claude: Failed');
+    expect(labels()).not.toContain('Send to ChatGPT');
   });
 });

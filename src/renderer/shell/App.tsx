@@ -15,7 +15,6 @@ import { ProjectSettings } from './components/ProjectSettings';
 import { StartPage } from './components/StartPage';
 import { TabBar } from './components/TabBar';
 import { disposeTerminal, terminalData } from './terminals';
-import { needsReviewDecision } from './viewModel';
 
 const EMPTY: ShellState = { workspaces: [], projects: [], activeWorkspaceId: null, debugMode: false };
 
@@ -130,9 +129,9 @@ export function App({ api }: { api: WorkspaceApi }) {
         void api.resetSession(id).then((r) => {
           if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Session not reset', body: r.detail ?? '' });
         }),
-      sendReview: (id, taskId) =>
-        void api.sendReview(id, taskId).then((r) => {
-          if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Review not sent', body: r.detail ?? '' });
+      retryReview: (id, taskId) =>
+        void api.retryReview(id, taskId).then((r) => {
+          if (!r.ok) toast({ workspaceId: id, kind: 'error', title: 'Result not delivered', body: r.detail ?? '' });
         }),
       restartTerminal: (id) => void api.terminalRestart(id),
       clearTerminal: (id) => api.terminalInput(id, '/clear\r'),
@@ -171,7 +170,6 @@ export function App({ api }: { api: WorkspaceApi }) {
         if (c === 'fullscreen-enter') setFullscreen(true);
         if (c === 'fullscreen-leave') setFullscreen(false);
         if (c === 'send-to-claude' && active) void actions.sendToClaude(active.id);
-        if (c === 'send-review' && active?.latestReview) void actions.sendReview(active.id, active.latestReview.taskId);
       }),
     [api, active, actions, queueDialog],
   );
@@ -292,7 +290,7 @@ export function App({ api }: { api: WorkspaceApi }) {
               busy={busy}
               style={{ left: view.statusBar.x, top: view.statusBar.y, width: view.statusBar.width, height: view.statusBar.height }}
               onSend={() => void actions.sendToClaude(active.id)}
-              onSendReview={() => active.latestReview && actions.sendReview(active.id, active.latestReview.taskId)}
+              onRetry={() => active.latestReview && actions.retryReview(active.id, active.latestReview.taskId)}
               onStop={() => actions.cancelTask(active.id)}
               onCancelAutoSend={() => actions.cancelAutoSend(active.id)}
               onOpenClaude={() => api.setViewMode(active.id, 'claude-focus')}

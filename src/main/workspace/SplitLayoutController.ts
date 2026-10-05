@@ -1,4 +1,4 @@
-import { clampSplitRatio, isValidSplitRatio, type Rect, type SplitGeometry, type SplitRatio } from '../../domain/layout/splitPane';
+import { clampSplitRatio, isValidSplitRatio, type Rect, type SplitRatio } from '../../domain/layout/splitPane';
 import { DEFAULT_VIEW_MODE, computeViewGeometry, isViewMode, type ViewMode } from '../../domain/layout/viewMode';
 
 /** Where per-Workspace split ratios and views are persisted (AppStateStore). */
@@ -33,8 +33,6 @@ export class SplitLayoutController {
   constructor(
     private readonly store: SplitRatioStore,
     private readonly getWorkArea: () => Rect,
-    /** Geometry of the visible split after every change; null while no divider is shown. */
-    private readonly onVisibleGeometry: (geometry: SplitGeometry | null) => void = () => {},
   ) {}
 
   register(workspaceId: string, view: LayoutView): void {
@@ -50,7 +48,6 @@ export class SplitLayoutController {
     this.modes.delete(workspaceId);
     if (this.active === workspaceId) {
       this.active = null;
-      this.onVisibleGeometry(null);
     }
   }
 
@@ -124,12 +121,10 @@ export class SplitLayoutController {
 
   /** Re-applies the active Workspace's geometry (window resize). */
   relayout(): void {
-    if (!this.active) return this.onVisibleGeometry(null);
+    if (!this.active) return;
     const geometry = this.geometry(this.active);
     // Hidden GPT: leave its bounds alone, it only gets setVisible(false) (no relayout of the page).
     if (geometry.chatgpt) this.views.get(this.active)!.setBounds(geometry.chatgpt);
-    // The relay buttons sit on the divider: no divider (a focus view), no buttons.
-    this.onVisibleGeometry(this.suppressed ? null : geometry.divider);
   }
 
   private update(ratio: number, persist: boolean): SplitRatio {

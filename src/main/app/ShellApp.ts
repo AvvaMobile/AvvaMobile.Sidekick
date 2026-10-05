@@ -833,7 +833,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     const t = target === 'auto' || target === 'full' ? target : isCopyBlock(target) ? { block: target.block } : null;
     return known(id) && t ? responses.copy(id, t) : { ok: false, code: 'invalid', detail: '' };
   });
-  handle('review:send', (id, taskId) => (known(id) && isId(taskId) ? orchestrator.sendReview(id, taskId) : { ok: false, code: 'invalid', detail: '' }));
+  handle('review:retry', (id, taskId) => (known(id) && isId(taskId) ? orchestrator.retryReview(id, taskId) : { ok: false, code: 'invalid', detail: '' }));
   handle('terminal:restart', (id) => {
     if (known(id)) pty.restart(id);
   });

@@ -29,11 +29,6 @@ export function sendState(ws: WorkspaceView | null): SendState {
   return { enabled: true, indicator: 'ready', label: 'Prompt ready', reason: 'Send the latest Claude Prompt block to Claude Code' };
 }
 
-/** A completed Claude result waits to be handed to ChatGPT (independent of a task that runs now). */
-export function needsReviewDecision(ws: WorkspaceView | null): boolean {
-  return !!ws?.latestReview;
-}
-
 export function shortPath(p: string): string {
   const m = p.match(/^\/Users\/[^/]+(\/.*)?$/);
   if (m) return `~${m[1] ?? ''}`;
@@ -41,12 +36,15 @@ export function shortPath(p: string): string {
   return w ? `~${w[1] ?? ''}` : p;
 }
 
-export type ClaudeStatus = 'idle' | 'running' | 'result-ready' | 'failed';
+export type ClaudeStatus = 'idle' | 'running' | 'sending' | 'delivered' | 'delivery-failed' | 'failed';
 
 /** Compact Claude state of a Workspace for the ChatGPT Focus status bar. */
 export function claudeStatus(ws: WorkspaceView): ClaudeStatus {
   const task = ws.task;
   if (task?.status === 'queued' || task?.status === 'running') return 'running';
-  if (ws.latestReview) return task?.id === ws.latestReview.taskId && task.outcome === 'failed' ? 'failed' : 'result-ready';
-  return ws.attention === 'failed' ? 'failed' : 'idle';
+  // A succeeded task's result goes to ChatGPT by itself; only a failed delivery needs the user (Retry).
+  if (ws.latestReview?.status === 'failed') return 'delivery-failed';
+  if (ws.latestReview?.status === 'sending') return 'sending';
+  if (task?.outcome === 'succeeded') return task.status === 'review_sent' ? 'delivered' : 'sending';
+  return task?.outcome === 'failed' || ws.attention === 'failed' ? 'failed' : 'idle';
 }

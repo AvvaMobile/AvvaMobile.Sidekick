@@ -51,7 +51,7 @@ const actions = () => ({
   cancelAutoSend: vi.fn(),
   cancelTask: vi.fn(),
   resetSession: vi.fn(),
-  sendReview: vi.fn(),
+  retryReview: vi.fn(),
   restartTerminal: vi.fn(),
   setModel: vi.fn(),
   setEffort: vi.fn(),
@@ -213,7 +213,7 @@ describe('development pane UI', () => {
       review: { status: 'pending' as const, lastError: null, body: 'packet' },
     };
     const a = render([ws('a', { task })], 'a');
-    expect(a.sendReview).not.toHaveBeenCalled();
+    expect(a.retryReview).not.toHaveBeenCalled();
     expect(host.querySelector('.review-bar')).toBeNull();
     expect(buttonLabels()).not.toContain('Send to ChatGPT for review');
     expect(buttonLabels()).not.toContain('Not now');

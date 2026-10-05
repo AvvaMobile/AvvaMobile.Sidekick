@@ -12,7 +12,7 @@ export interface DevPaneActions {
   cancelAutoSend(id: string): void;
   cancelTask(id: string): void;
   resetSession(id: string): void;
-  sendReview(id: string, taskId: string): void;
+  retryReview(id: string, taskId: string): void;
   restartTerminal(id: string): void;
   setModel(id: string, model: ModelChoice): void;
   /** null = Claude Code's default effort. */
@@ -190,6 +190,16 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
 
       {active?.autoSend && <AutoSendBar at={active.autoSend.at} onCancel={() => actions.cancelAutoSend(active.id)} />}
       {active?.autoSendNotice && !active.autoSend && <AutoSendNotice notice={active.autoSendNotice} />}
+      {active?.latestReview?.status === 'failed' && (
+        <div className="review-bar" role="status">
+          <span className="review-title" title={active.latestReview.lastError ?? ''}>
+            Result delivery failed
+          </span>
+          <button className="btn small primary" onClick={() => actions.retryReview(active.id, active.latestReview!.taskId)}>
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="devpane-body">
         <TerminalHost

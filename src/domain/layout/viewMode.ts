@@ -6,7 +6,7 @@
  * - split:         ChatGPT | terminal with one draggable splitter (the Workspace's saved ratio).
  * - claude-focus:  the terminal fills the work area; the ChatGPT view stays alive, hidden.
  */
-import { computeSplitGeometry, type Rect, type SplitGeometry } from './splitPane';
+import { computeSplitGeometry, type Rect } from './splitPane';
 
 export type ViewMode = 'chatgpt-focus' | 'split' | 'claude-focus';
 export const VIEW_MODES: readonly ViewMode[] = ['chatgpt-focus', 'split', 'claude-focus'];
@@ -29,14 +29,12 @@ export interface ViewGeometry {
   devPaneVisible: boolean;
   /** Claude status bar; ChatGPT Focus only. */
   statusBar: Rect | null;
-  /** Geometry for the relay buttons on the divider (Split only). */
-  divider: SplitGeometry | null;
 }
 
 export function computeViewGeometry(area: Rect, viewMode: ViewMode, ratio: number): ViewGeometry {
   const split = computeSplitGeometry(area, ratio);
-  if (viewMode === 'split') return { chatgpt: split.chatgpt, splitter: split.splitter, devPane: split.devPane, devPaneVisible: true, statusBar: null, divider: split };
-  if (viewMode === 'claude-focus') return { chatgpt: null, splitter: null, devPane: { ...area }, devPaneVisible: true, statusBar: null, divider: null };
+  if (viewMode === 'split') return { chatgpt: split.chatgpt, splitter: split.splitter, devPane: split.devPane, devPaneVisible: true, statusBar: null };
+  if (viewMode === 'claude-focus') return { chatgpt: null, splitter: null, devPane: { ...area }, devPaneVisible: true, statusBar: null };
   const barH = Math.min(STATUS_BAR_HEIGHT, area.height);
   const chatgpt: Rect = { ...area, height: Math.max(0, area.height - barH) };
   return {
@@ -46,7 +44,6 @@ export function computeViewGeometry(area: Rect, viewMode: ViewMode, ratio: numbe
     devPane: split.devPane,
     devPaneVisible: false,
     statusBar: { x: area.x, y: area.y + chatgpt.height, width: area.width, height: barH },
-    divider: null,
   };
 }
 

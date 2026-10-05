@@ -6,6 +6,7 @@ import {
   isChatGptAppUrl,
   isChatGptConversationUrl,
   isSafeExternalUrl,
+  sameConversationUrl,
 } from '../origins';
 
 describe('origin policy', () => {
@@ -73,5 +74,19 @@ describe('origin policy', () => {
     expect(isSafeExternalUrl('file:///Applications/Calculator.app')).toBe(false);
     expect(isSafeExternalUrl('smb://host/share')).toBe(false);
     expect(isSafeExternalUrl('javascript:alert(1)')).toBe(false);
+  });
+});
+
+describe('sameConversationUrl', () => {
+  it('compares the conversation (origin + path), ignoring query, fragment and a trailing slash', () => {
+    expect(sameConversationUrl('https://chatgpt.com/c/abc?model=x#y', 'https://chatgpt.com/c/abc/')).toBe(true);
+    expect(sameConversationUrl('https://chatgpt.com/c/abc', 'https://chatgpt.com/c/def')).toBe(false);
+    expect(sameConversationUrl('https://chatgpt.com/g/g-1/c/abc', 'https://chatgpt.com/c/abc')).toBe(false);
+  });
+
+  it('never matches an unknown or non-conversation URL', () => {
+    expect(sameConversationUrl(null, 'https://chatgpt.com/c/abc')).toBe(false);
+    expect(sameConversationUrl('https://chatgpt.com/', 'https://chatgpt.com/')).toBe(false);
+    expect(sameConversationUrl('https://evil.example/c/abc', 'https://evil.example/c/abc')).toBe(false);
   });
 });

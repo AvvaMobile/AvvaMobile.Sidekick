@@ -1,5 +1,5 @@
 import type { WebContents } from 'electron';
-import { isChatGptAppUrl, isChatGptConversationUrl } from '../security/origins';
+import { conversationUrlToStore, isChatGptAppUrl, isChatGptConversationUrl, sameConversationUrl } from '../security/origins';
 import {
   CLAUDE_PROMPT_LANGUAGE,
   SELECTORS,
@@ -33,7 +33,9 @@ export type AdapterErrorCode =
   | 'still_generating'
   | 'no_assistant_messages'
   | 'no_prompt_block'
-  | 'not_found';
+  | 'not_found'
+  /** The conversation a result belongs to is unknown or could not be opened. */
+  | 'conversation_unavailable';
 
 export type AdapterResult<T> = { ok: true; value: T } | { ok: false; code: AdapterErrorCode; detail: string };
 
@@ -55,7 +57,32 @@ export class ChatGPTAdapter {
   getConversationUrl(): string | null {
     if (this.wc.isDestroyed()) return null;
     const url = this.wc.getURL();
-    return isChatGptConversationUrl(url) ? url : null;
+    // Origin and path only: a query or fragment can carry tokens and is never stored.
+    return isChatGptConversationUrl(url) ? conversationUrlToStore(url) : null;
+  }
+
+  /**
+   * Makes sure the view shows exactly `expectedUrl` (the conversation a managed task started from) before
+   * anything is inserted. Already there: nothing happens. Elsewhere in the same Workspace: navigates back
+   * and waits for the composer. Anything uncertain fails; the caller never guesses another conversation.
+   */
+  async ensureConversation(expectedUrl: string | null): Promise<AdapterResult<{ restored: boolean }>> {
+    if (!expectedUrl || !isChatGptConversationUrl(expectedUrl)) return { ok: false, code: 'conversation_unavailable', detail: 'The source conversation is unknown' };
+    if (this.wc.isDestroyed()) return { ok: false, code: 'view_unavailable', detail: 'ChatGPT view destroyed' };
+    if (sameConversationUrl(this.wc.getURL(), expectedUrl)) return { ok: true, value: { restored: false } };
+    try {
+      await this.wc.loadURL(conversationUrlToStore(expectedUrl));
+    } catch (err) {
+      return { ok: false, code: 'conversation_unavailable', detail: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
+    }
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (this.wc.isDestroyed()) return { ok: false, code: 'view_unavailable', detail: 'ChatGPT view destroyed' };
+      if (!sameConversationUrl(this.wc.getURL(), expectedUrl)) return { ok: false, code: 'conversation_unavailable', detail: 'ChatGPT did not open the source conversation' };
+      const composer = await this.run(scriptCall(composerTextScript, { sel: SELECTORS }));
+      if (composer.ok && composer.value.ok) return { ok: true, value: { restored: true } };
+      await delay(500);
+    }
+    return { ok: false, code: 'conversation_unavailable', detail: 'The source conversation did not become ready' };
   }
 
   async getPageState(): Promise<AdapterResult<PageState>> {
