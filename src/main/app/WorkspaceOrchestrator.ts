@@ -89,12 +89,16 @@ interface Runtime {
   candidateMisses: number;
   /** Short feedback for the user when an auto-send request could not start or run. */
   notice: { text: string; at: string } | null;
+  /** An intercepted command that arrived while ChatGPT was still writing the prompt: it fires with that prompt (D045). */
+  pendingIntent: { requestId: string; at: number } | null;
   /** Scheduled user-requested auto-send (D034). `waits`: seconds spent waiting for ChatGPT to finish its reply. */
   autoSend: { key: string; messageId: string | null; at: string; timer: ReturnType<typeof setTimeout>; waits: number } | null;
 }
 
 /** Observations without a prompt block before the candidate is dropped. */
 const CANDIDATE_MISS_LIMIT = 3;
+/** How long an intercepted command waits for ChatGPT to finish writing its prompt. */
+const PENDING_INTENT_MS = 60_000;
 /** Most 1 s waits for ChatGPT to finish replying before an armed auto-send gives up waiting. */
 const AUTO_SEND_MAX_WAITS = 90;
 
@@ -141,6 +145,7 @@ export class WorkspaceOrchestrator {
       scheduledPairs: new Set(),
       candidateMisses: 0,
       notice: null,
+      pendingIntent: null,
       autoSend: null,
     });
   }
@@ -675,6 +680,12 @@ export class WorkspaceOrchestrator {
     if (task && sourcePrompt(task) === text && task.outcome === 'succeeded') return; // already ran: not waiting on the user
     this.flow(workspaceId, 'prompt_ready', firstLine(text), messageId);
     this.nudge(workspaceId, ws.name, 'Claude Prompt ready', 'ChatGPT wrote a prompt that has not been sent to Claude yet.');
+    const rt = this.runtimes.get(workspaceId);
+    const pending = rt?.pendingIntent;
+    if (rt && pending) {
+      rt.pendingIntent = null;
+      if (this.now().getTime() - pending.at < PENDING_INTENT_MS && this.autoSendEnabled()) return this.startAutoSend(workspaceId, rt, pending.requestId);
+    }
     void this.maybeScheduleAutoSend(workspaceId, messageId, text);
   }
 
@@ -744,13 +755,26 @@ export class WorkspaceOrchestrator {
     this.startAutoSend(workspaceId, rt, key);
   }
 
+  /**
+   * A Sidekick command ("şimdi bunu claude gönder") was stopped in the ChatGPT composer before it was
+   * submitted (D045). It is not a ChatGPT message: it goes through exactly the same auto-send path as a
+   * message seen afterwards (candidate, countdown, duplicate protection, managed task).
+   */
+  observeInterceptedIntent(workspaceId: string, intent: { id: string }): void {
+    const rt = this.runtimes.get(workspaceId);
+    if (!rt) return;
+    if (!this.autoSendEnabled()) return void this.setNotice(workspaceId, rt, NOTICE_DISABLED);
+    this.startAutoSend(workspaceId, rt, `intercept:${intent.id}`);
+  }
+
   /** The user asked to send: use the candidate held now, or tell them why that is not possible. */
   private startAutoSend(workspaceId: string, rt: Runtime, requestId: string): void {
     if (rt.autoSend) return; // a countdown is already running
     const cand = this.handoff.getCandidate(workspaceId);
     if (!cand) {
-      // ChatGPT may still be writing the very prompt the user asked for: promptReady schedules that one.
+      // ChatGPT may still be writing the very prompt the user asked for: keep the request for it.
       if (!rt.generating && !rt.pendingCandidateKey) this.setNotice(workspaceId, rt, NOTICE_NO_PROMPT);
+      else rt.pendingIntent = { requestId, at: this.now().getTime() };
       return;
     }
     const key = candidateKey(cand.messageId, cand.text);
@@ -869,6 +893,7 @@ const candidateKey = (messageId: string | null, text: string) => `${messageId ??
 const requestKey = (messageId: string | null, text: string) => messageId ?? `text:${text}`;
 
 const NOTICE_NO_PROMPT = 'No Claude prompt ready.';
+const NOTICE_DISABLED = 'Auto-send is turned off in Settings.';
 const NOTICE_BUSY = 'Claude is already working.';
 const NOTICE_ALREADY_SENT = 'This prompt has already been sent.';
 const NOTICE_CHANGED = 'Claude prompt changed. Please send again.';

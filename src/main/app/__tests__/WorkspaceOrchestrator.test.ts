@@ -843,6 +843,122 @@ describe('WorkspaceOrchestrator', () => {
       expect(runs).toHaveLength(0);
     });
   });
+  describe('intercepted Sidekick command (stopped before ChatGPT saw it, D045)', () => {
+    const tick = (ms: number) => vi.advanceTimersByTimeAsync(ms);
+    beforeEach(async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      chats.a!.getLatestUserMessage.mockImplementation(async () => ({ ok: true, value: { text: 'Write a prompt', messageId: 'u-1' } }));
+      await orch.observeUserMessage('a'); // baseline
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('uses the stored candidate: countdown, then one managed task — also with the terminal hidden (ChatGPT Focus)', async () => {
+      store.setViewMode('a', 'chatgpt-focus');
+      seen('a', blocks.a!);
+      await tick(0);
+      orch.observeInterceptedIntent('a', { id: 'i-1' });
+      expect(orch.view('a')!.autoSend).not.toBeNull();
+      await tick(2_999);
+      expect(runs).toHaveLength(0);
+      await tick(1);
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.prompt).toBe('Prompt for A');
+      expect(chats.a!.getLatestClaudePromptBlock).toHaveBeenCalled(); // captured fresh at send time
+    });
+
+    it('the countdown can be cancelled and nothing starts', async () => {
+      seen('a', blocks.a!);
+      orch.observeInterceptedIntent('a', { id: 'i-1' });
+      expect(orch.cancelAutoSendRequest('a').ok).toBe(true);
+      await tick(10_000);
+      expect(runs).toHaveLength(0);
+    });
+
+    it('pressing Enter twice (two intercepted commands) starts one task', async () => {
+      seen('a', blocks.a!);
+      orch.observeInterceptedIntent('a', { id: 'i-1' });
+      orch.observeInterceptedIntent('a', { id: 'i-2' });
+      await tick(3_000);
+      await tick(0);
+      orch.observeInterceptedIntent('a', { id: 'i-3' }); // while running
+      await tick(3_000);
+      expect(runs).toHaveLength(1);
+      expect(orch.view('a')!.autoSendNotice?.text).toMatch(/already working/);
+    });
+
+    it('the fallback poll for the same user action cannot start a second task', async () => {
+      seen('a', blocks.a!);
+      orch.observeInterceptedIntent('a', { id: 'i-1' });
+      // The guard failed to stop the message: it reached ChatGPT and the post-submit poll sees it too.
+      chats.a!.getLatestUserMessage.mockImplementation(async () => ({ ok: true, value: { text: 'şimdi bunu claude gönder', messageId: 'u-2' } }));
+      await orch.observeUserMessage('a');
+      await tick(3_000);
+      await tick(0);
+      await orch.observeUserMessage('a');
+      await tick(10_000);
+      expect(runs).toHaveLength(1);
+    });
+
+    it('no candidate and ChatGPT idle: tells the user, starts nothing', async () => {
+      orch.observeInterceptedIntent('a', { id: 'i-1' });
+      expect(orch.view('a')!.autoSend).toBeNull();
+      expect(orch.view('a')!.autoSendNotice?.text).toBe('No Claude prompt ready.');
+      await tick(10_000);
+      expect(runs).toHaveLength(0);
+    });
+
+    it('no candidate yet but ChatGPT is still writing it: the command waits for that prompt, then counts down', async () => {
+      orch.observeCandidate('a', { ok: false, code: 'still_generating', detail: '' });
+      orch.observeInterceptedIntent('a', { id: 'i-1' });
+      expect(orch.view('a')!.autoSend).toBeNull();
+      expect(orch.view('a')!.autoSendNotice).toBeNull();
+      orch.observeCandidate('a', ok('Fresh prompt', 'msg-5'));
+      orch.observeCandidate('a', ok('Fresh prompt', 'msg-5'));
+      expect(orch.view('a')!.autoSend).not.toBeNull();
+      blocks.a = ok('Fresh prompt', 'msg-5');
+      await tick(3_000);
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.prompt).toBe('Fresh prompt');
+    });
+
+    it('generic ChatGPT prose never becomes the prompt (a waiting command is not fed by non-prompt replies)', async () => {
+      orch.observeCandidate('a', { ok: false, code: 'still_generating', detail: '' });
+      orch.observeInterceptedIntent('a', { id: 'i-1' });
+      orch.observeCandidate('a', { ok: false, code: 'no_prompt_block', detail: '' });
+      await tick(10_000);
+      expect(runs).toHaveLength(0);
+    });
+
+    it('with auto-send turned off the command is not started and the user is told', async () => {
+      seen('a', blocks.a!);
+      orch.setAutoSendEnabled(false);
+      orch.observeInterceptedIntent('a', { id: 'i-1' });
+      expect(orch.view('a')!.autoSend).toBeNull();
+      expect(orch.view('a')!.autoSendNotice?.text).toMatch(/turned off/);
+      await tick(10_000);
+      expect(runs).toHaveLength(0);
+    });
+
+    it('stays inside its Workspace', async () => {
+      seen('a', blocks.a!);
+      seen('b', blocks.b!);
+      orch.observeInterceptedIntent('b', { id: 'i-1' });
+      await tick(3_000);
+      expect(runs.map((r) => r.workspaceId)).toEqual(['b']);
+    });
+
+    it('the managed task started by an intercepted command still hands back automatically', async () => {
+      seen('a', blocks.a!);
+      orch.observeInterceptedIntent('a', { id: 'i-1' });
+      await tick(3_000);
+      complete(runs[0]!, 'Done by Claude');
+      await tick(0);
+      await tick(0);
+      expect(chats.a!.inserted[0]).toContain('Done by Claude');
+      expect(chats.a!.submitted).toBe(1);
+    });
+  });
+
   describe('the user message itself triggers auto-send (D034)', () => {
     const tick = (ms: number) => vi.advanceTimersByTimeAsync(ms);
     const poll = async (ws = 'a') => {

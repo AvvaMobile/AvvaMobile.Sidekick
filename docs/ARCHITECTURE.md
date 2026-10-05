@@ -79,6 +79,8 @@ All ChatGPT views share one persistent partition (`persist:chatgpt`) so the user
 
 Every operation runs in an isolated world, verifies the origin before and after, times out, returns a typed result, and never returns page HTML wholesale. No other component knows DOM selectors.
 
+Pre-submit command guard (D045): `installIntentGuardScript` (capture-phase Enter/click/submit listeners in the isolated world) stops explicit "send this to Claude" composer commands before ChatGPT submits them and queues them; `ChatGPTAdapter.takeInterceptedIntents` drains the queue every 250 ms for visible views and `WorkspaceOrchestrator.observeInterceptedIntent` feeds the normal auto-send path. The post-submit poll remains as fallback.
+
 ## 6. DOM resilience
 
 ChatGPT's DOM is not a stable API. Rules: prefer semantic attributes and ARIA over generated class names; keep selectors in `pageScripts.ts`; cover observed page structures with fixtures (`pageScripts.test.ts`); detect unsupported states explicitly; never click unknown controls; never use screen coordinates; store no authentication material from the page.

@@ -298,6 +298,132 @@ export function clickSendScript(args: { sel: PageSelectors }): SubmitResult {
   return { ok: true, via: 'send-button' };
 }
 
+// ---------- Pre-submit interception of Sidekick commands (D045) ----------
+
+export interface InterceptedIntent {
+  /** Unique per intercepted command (page-local counter + time). */
+  id: string;
+  text: string;
+  detectedAt: string;
+}
+
+export interface IntentGuardArgs {
+  sel: PageSelectors;
+  /** Longest composer text still treated as a command; longer messages are normal chat. */
+  maxChars: number;
+  /** Production: only real user input (`isTrusted`) is intercepted; tests dispatch synthetic events. */
+  trustedOnly: boolean;
+}
+
+/** `window.__sidekickIntentGuard` lives only in this script's isolated world; the page cannot see it. */
+interface GuardState {
+  queue: InterceptedIntent[];
+  n: number;
+  enabled: boolean;
+}
+
+/**
+ * Installs capture-phase listeners (Enter, send-button click, form submit) that stop a composer message
+ * which is an explicit "send this to Claude" command BEFORE ChatGPT's own handlers see it, clear the
+ * composer and queue the command for the main process. Anything else is untouched; every failure path
+ * lets the event through (fail-open). Idempotent per document.
+ *
+ * `isIntent` is `isSendToClaudeRequest` (self-contained); the call is built by `intentGuardCall`.
+ */
+export function installIntentGuardScript(args: IntentGuardArgs, isIntent: (text: string) => boolean): { ok: true; installed: boolean } {
+  const w = window as unknown as { __sidekickIntentGuard?: GuardState };
+  if (w.__sidekickIntentGuard) return { ok: true, installed: false };
+  const state: GuardState = { queue: [], n: 0, enabled: true };
+  w.__sidekickIntentGuard = state;
+  const sel = args.sel;
+
+  const composer = (): HTMLElement | null => (Array.from(document.querySelectorAll(sel.composer)).find((c) => !c.closest(sel.writingBlock)) ?? null) as HTMLElement | null;
+  const read = (el: HTMLElement): string => (el.tagName === 'TEXTAREA' ? (el as HTMLTextAreaElement).value : (el.innerText ?? el.textContent ?? ''));
+
+  /** Empties the composer through the editor's own input path so ChatGPT's state follows the DOM. */
+  const clear = (el: HTMLElement): void => {
+    el.focus();
+    if (el.tagName === 'TEXTAREA') {
+      const ta = el as HTMLTextAreaElement;
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (setter) setter.call(ta, '');
+      else ta.value = '';
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
+    try {
+      document.execCommand('selectAll', false);
+      document.execCommand('delete', false);
+    } catch {
+      // fall through to the manual path
+    }
+    if (read(el).trim()) {
+      el.textContent = '';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  };
+
+  /** True when the event was a Sidekick command and has been stopped. */
+  const intercept = (e: Event): boolean => {
+    try {
+      if (!state.enabled || (args.trustedOnly && !e.isTrusted)) return false;
+      const el = composer();
+      if (!el) return false;
+      const text = read(el).trim();
+      if (!text || text.length > args.maxChars || !isIntent(text)) return false;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      clear(el);
+      state.queue.push({ id: `${Date.now().toString(36)}-${++state.n}`, text, detectedAt: new Date().toISOString() });
+      return true;
+    } catch {
+      return false; // fail-open: ChatGPT proceeds as usual
+    }
+  };
+
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      const k = e as KeyboardEvent;
+      if (k.key !== 'Enter' || k.shiftKey || k.altKey || k.isComposing || k.repeat) return;
+      const el = composer();
+      const target = e.target as Node | null;
+      if (!el || !target || !(el === target || el.contains(target))) return;
+      intercept(e);
+    },
+    true,
+  );
+  document.addEventListener(
+    'click',
+    (e) => {
+      const t = e.target as Element | null;
+      if (t && typeof t.closest === 'function' && t.closest(sel.sendButton)) intercept(e);
+    },
+    true,
+  );
+  document.addEventListener('submit', (e) => void intercept(e), true);
+  return { ok: true, installed: true };
+}
+
+export interface TakeIntentsResult {
+  installed: boolean;
+  intents: InterceptedIntent[];
+}
+
+/** Atomically takes (and clears) the queued commands; also tells the guard whether interception is currently wanted. */
+export function takeInterceptedIntentsScript(args: { enabled: boolean }): TakeIntentsResult {
+  const s = (window as unknown as { __sidekickIntentGuard?: GuardState }).__sidekickIntentGuard;
+  if (!s) return { installed: false, intents: [] };
+  s.enabled = args.enabled;
+  return { installed: true, intents: s.queue.splice(0) };
+}
+
+/** Serialized install call: the guard plus the self-contained intent matcher, args JSON-encoded. */
+export function intentGuardCall(args: IntentGuardArgs, isIntent: (text: string) => boolean): PageScript<{ ok: true; installed: boolean }> {
+  return `(${installIntentGuardScript.toString()})(${JSON.stringify(args)}, ${isIntent.toString()})` as PageScript<{ ok: true; installed: boolean }>;
+}
+
 /** Serialized page-script invocation carrying its result type. */
 export type PageScript<R> = string & { readonly __result?: R };
 

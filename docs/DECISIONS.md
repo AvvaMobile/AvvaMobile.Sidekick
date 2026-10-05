@@ -377,3 +377,18 @@ Routing: the task records `sourceConversationUrl` (origin + path of the ChatGPT 
 
 Reason:
 The product experience is "ChatGPT plans, Claude works in the background, ChatGPT reviews". A click after every managed run defeated it, while the explicit send intent on the way out keeps control where it matters. Strict conversation identity prevents a result from landing in the wrong project or conversation.
+
+## D045 - Sidekick command interception: handoff commands are stopped before ChatGPT submits them
+
+Decision:
+Explicit handoff commands typed or dictated into the ChatGPT composer ("şimdi bunu claude gönder", "send this to Claude", D034 wording incl. negation protection) are Sidekick commands, not ChatGPT conversation messages. When technically possible they are intercepted before submission, so ChatGPT never receives them (and never answers "I can't send to Claude").
+- Mechanism: a page script in the existing isolated world (`executeJavaScriptInIsolatedWorld`) installs capture-phase listeners on `document` for Enter (no Shift/Alt, not IME composition), clicks on the send button and `submit`. It reads the composer (contenteditable/ProseMirror or textarea), and only when the text is short (<= 240 chars) and `isSendToClaudeRequest` matches (the very same self-contained function, serialized into the page) it calls `preventDefault`/`stopPropagation`/`stopImmediatePropagation`, clears the composer through the editor's own input path (`execCommand` selectAll+delete, input event fallback) and pushes `{id, text, detectedAt}` onto a queue that lives only in the isolated world. Only trusted (real user) events are intercepted.
+- Transport: no preload, no IPC bridge, no Node, no title/localStorage tricks. Main drains the queue atomically with a light 250 ms read (`ChatGPTAdapter.takeInterceptedIntents`, visible views only); the 1 s DOM/candidate poll is unchanged. The same read reports whether the guard exists, so a reloaded page gets it reinstalled; it is also installed on `did-finish-load`, `did-navigate` and `did-navigate-in-page` (idempotent per document).
+- Orchestration: `WorkspaceOrchestrator.observeInterceptedIntent` enters the same `startAutoSend` path as a message seen after submission (stored candidate, 3 s cancellable countdown, duplicate protection, managed task, automatic handback D044). With no candidate while ChatGPT is still writing the prompt, the command waits up to 60 s for that prompt; with nothing to send the user gets a notice. No separate pipeline.
+- Fail-open: any error, a non-matching message, long text, Shift+Enter, auto-send turned off (synced on every read) or a missing/old page script leaves ChatGPT's normal behavior untouched.
+- The post-submit poll (`getLatestUserMessage` -> `observeUserMessage`, D034) stays as the fallback for selector breakage, unexpected submit paths and non-DOM submits; duplicate protection keeps both paths from starting two tasks.
+- Voice: typed or dictated composer submission is intercepted. ChatGPT Live Voice is a server-streamed turn with no composer submit; pre-submit interception is not guaranteed there, and the post-submit fallback applies. Voice architecture is out of scope.
+
+Reason:
+A command meant for Sidekick must not become a ChatGPT turn that makes the model answer something wrong. The isolated-world DOM approach keeps the remote content without any bridge (SECURITY §2), and keeping the existing polling as a fallback makes the feature degrade to the previous behavior instead of failing.
+

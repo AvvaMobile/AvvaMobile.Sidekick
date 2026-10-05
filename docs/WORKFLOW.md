@@ -21,7 +21,7 @@ The user talks with ChatGPT, normally using voice.
 
 This phase can last as many turns as required.
 
-Nothing is sent to Claude Code automatically during planning. The one exception is explicit delegation by the user: when the user's own message asks ChatGPT to send the prompt to Claude, the ready prompt is sent after a cancellable 3-second countdown (D034, can be turned off in Settings).
+Nothing is sent to Claude Code automatically during planning. The one exception is explicit delegation by the user: when the user's own message asks ChatGPT to send the prompt to Claude, the ready prompt is sent after a cancellable 3-second countdown (D034/D045, can be turned off in Settings).
 
 ### Step 3: Produce the implementation prompt
 
@@ -116,6 +116,12 @@ Control and escape characters are removed before the prompt is pasted, so text i
 Voice-triggered handoff is desirable but must not be implemented as uncontrolled fuzzy matching.
 
 Implemented as D034: the latest (possibly voice-transcribed) ChatGPT user message is checked against a narrow set of explicit, imperative send phrases; negation, deferral or conditions reject it. False negatives are preferred; the button is the fallback.
+
+Since D045 such a command is stopped **before** ChatGPT submits it, so it never becomes a conversation message and ChatGPT cannot answer "I can't send to Claude":
+
+- typed or dictated composer submission (Enter, send button, form submit): intercepted;
+- ChatGPT Live Voice (server-streamed turn, no composer submit): pre-submit interception is not guaranteed; the post-submit detection above is the fallback;
+- the countdown, candidate, duplicate protection and managed task are the same for both paths.
 
 Any voice-trigger path calls the exact same orchestration command as the button.
 

@@ -1,4 +1,5 @@
 import type { WebContents } from 'electron';
+import { isSendToClaudeRequest } from '../../domain/handoff/autoSend';
 import { conversationUrlToStore, isChatGptAppUrl, isChatGptConversationUrl, sameConversationUrl } from '../security/origins';
 import {
   CLAUDE_PROMPT_LANGUAGE,
@@ -6,6 +7,10 @@ import {
   clickSendScript,
   composerTextScript,
   focusComposerScript,
+  intentGuardCall,
+  takeInterceptedIntentsScript,
+  type InterceptedIntent,
+  type TakeIntentsResult,
   latestClaudePromptBlockScript,
   latestMessageTextScript,
   pageStateScript,
@@ -19,6 +24,8 @@ import {
 const ADAPTER_WORLD_ID = 1001;
 const DEFAULT_TIMEOUT_MS = 5_000;
 export const MAX_PROMPT_CHARS = 100_000;
+/** A composer message longer than this is normal chat, never a Sidekick command. */
+export const MAX_COMMAND_CHARS = 240;
 
 export type AdapterErrorCode =
   | 'view_unavailable'
@@ -38,6 +45,8 @@ export type AdapterErrorCode =
   | 'conversation_unavailable';
 
 export type AdapterResult<T> = { ok: true; value: T } | { ok: false; code: AdapterErrorCode; detail: string };
+
+export type { InterceptedIntent };
 
 export interface ClaudePromptCandidate {
   text: string;
@@ -106,6 +115,17 @@ export class ChatGPTAdapter {
         capturedAt: new Date().toISOString(),
       },
     };
+  }
+
+  /** Installs the pre-submit command guard in this document (idempotent). Fail-open: errors only mean no interception. */
+  async installIntentGuard(): Promise<AdapterResult<{ installed: boolean }>> {
+    const res = await this.run(intentGuardCall({ sel: SELECTORS, maxChars: MAX_COMMAND_CHARS, trustedOnly: true }, isSendToClaudeRequest));
+    return res.ok ? { ok: true, value: { installed: res.value.installed } } : res;
+  }
+
+  /** Takes the commands the guard stopped before ChatGPT saw them; `installed: false` means the page was reloaded (reinstall). */
+  async takeInterceptedIntents(enabled: boolean): Promise<AdapterResult<TakeIntentsResult>> {
+    return this.run(scriptCall(takeInterceptedIntentsScript, { enabled }), 2_000);
   }
 
   async getLatestUserMessage(maxChars = 2_000): Promise<AdapterResult<LatestTextResult & { ok: true }>> {

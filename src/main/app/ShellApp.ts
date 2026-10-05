@@ -65,6 +65,8 @@ interface ShellWindow {
 }
 
 const POLL_MS = 1000;
+/** Cadence of the light check for Sidekick commands stopped in the ChatGPT composer (D045). */
+const INTENT_POLL_MS = 250;
 const INACTIVE_EVERY = 5;
 const LOGIN_CHECK_EVERY = 5;
 
@@ -379,11 +381,18 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       const stored = conversationUrlToStore(url);
       if (store.workspace(w.id)!.chatConversationUrl !== stored) store.updateWorkspace(w.id, { chatConversationUrl: stored });
     };
+    // The pre-submit command guard (D045) is idempotent; the intent poll also reinstalls it after a reload.
+    const guard = () => void adapter.installIntentGuard();
+    view.webContents.on('did-finish-load', guard);
     view.webContents.on('did-navigate', (_e, url) => {
       trackUrl(url);
+      guard();
       void view.webContents.session.cookies.flushStore();
     });
-    view.webContents.on('did-navigate-in-page', (_e, url) => trackUrl(url));
+    view.webContents.on('did-navigate-in-page', (_e, url) => {
+      trackUrl(url);
+      guard();
+    });
     view.webContents.on('render-process-gone', (_e, d) => diag(`[${w.id.slice(0, 8)}] render-process-gone ${d.reason}`));
     // ChatGPT's beforeunload handler would otherwise veto closing the window / quitting the app.
     view.webContents.on('will-prevent-unload', (e) => e.preventDefault());
@@ -481,6 +490,27 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
       })();
     }
   }, POLL_MS);
+
+  // Sidekick commands stopped before ChatGPT saw them (D045): a tiny queue read, only for visible ChatGPT views.
+  const intentInFlight = new Set<string>();
+  const intentPoll = setInterval(() => {
+    for (const [id, c] of chats) {
+      if (windowOf.get(id)?.layout.activeWorkspaceId !== id) continue;
+      if (intentInFlight.has(id) || c.view.webContents.isLoading()) continue;
+      intentInFlight.add(id);
+      void (async () => {
+        try {
+          const res = await c.adapter.takeInterceptedIntents(orchestrator.autoSendEnabled());
+          if (!res.ok) return;
+          // A reloaded page lost the guard (it lives in the page's isolated world): put it back.
+          if (!res.value.installed) await c.adapter.installIntentGuard();
+          for (const intent of res.value.intents) orchestrator.observeInterceptedIntent(id, intent);
+        } finally {
+          intentInFlight.delete(id);
+        }
+      })();
+    }
+  }, INTENT_POLL_MS);
 
   // ---------- IPC (trusted shell renderer only) ----------
 
@@ -1072,6 +1102,7 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     // Secondary windows close without handing their tabs back; nothing about windows is persisted.
     quitting = true;
     clearInterval(poll);
+    clearInterval(intentPoll);
     updates.stop();
     orchestrator.shutdown();
     pty.stopAll();

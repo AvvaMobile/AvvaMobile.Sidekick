@@ -64,3 +64,17 @@ describe('isSendToClaudeRequest', () => {
     expect(isSendToClaudeRequest(long)).toBe(true);
   });
 });
+
+describe('isSendToClaudeRequest is self-contained (it runs inside the ChatGPT page, D045)', () => {
+  const standalone = new Function(`return ${isSendToClaudeRequest.toString()}`)() as typeof isSendToClaudeRequest;
+  const corpus = [
+    "şimdi bunu claude gönder", "bunu Claude'a gönder", 'send this to Claude', 'Claude hakkında ne düşünüyorsun?', "Claude'a gönderme",
+    'claude a atar misin', 'gönder claude ya', 'do not send this to claude', 'hello', '',
+  ];
+  it('gives the same answers when evaluated without any module scope', () => {
+    for (const text of corpus) expect(standalone(text), text).toBe(isSendToClaudeRequest(text));
+    expect(standalone('send this to Claude')).toBe(true);
+    expect(standalone("Claude'a gönderme")).toBe(false);
+  });
+});
+

@@ -37,6 +37,7 @@ For ChatGPT WebContentsView:
 - no generic preload API
 - no remote module
 - no direct IPC exposure
+- the only page code Sidekick adds runs in an isolated world (adapter scripts and the pre-submit command guard, D045); results come back as small typed values via `executeJavaScriptInIsolatedWorld`, never through a bridge
 - navigation allowlist
 - window-open allowlist
 - permission request handler
