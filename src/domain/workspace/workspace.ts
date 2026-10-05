@@ -1,7 +1,6 @@
 import type { EffortChoice, ModelChoice } from '../../shared/models';
 import type { GithubAccess } from '../../shared/github';
 import type { FlowEntry } from '../../shared/state';
-import type { LayoutMode } from '../layout/splitPane';
 
 export interface WorkspaceRecord {
   id: string;
@@ -15,7 +14,13 @@ export interface WorkspaceRecord {
   chatConversationUrl: string | null;
   claudeSessionId: string | null;
   /** Older state files may also carry a `devPaneMode` here; it is ignored. */
-  uiState: { splitRatio: number; /** Absent in records saved before presets: treated as 'custom'. */ layoutMode?: LayoutMode };
+  uiState: {
+    splitRatio: number;
+    /** ChatGPT Focus / Split / Claude Focus. Absent in older records: derived from `layoutMode`, else Split. */
+    viewMode?: string;
+    /** Deprecated (removed layout presets): read once to derive the view and ratio, never deleted so older versions still load. */
+    layoutMode?: string;
+  };
   lastTaskId: string | null;
   /** Custom icon image (file name under `<userData>/icons`), or none for the colored initial. */
   iconFile?: string | null;

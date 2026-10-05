@@ -30,7 +30,7 @@ function ws(id: string, over: Partial<WorkspaceView> = {}): WorkspaceView {
     model: 'opus',
     effort: null,
     splitRatio: 0.6,
-    layoutMode: 'custom',
+    viewMode: 'split',
     attention: 'none',
     chatgpt: { generating: false, loggedIn: true },
     candidate: null,
@@ -219,26 +219,30 @@ describe('development pane UI', () => {
   });
 });
 
-describe('layout presets in the tab bar', () => {
-  const render = (layoutMode: Parameters<typeof TabBar>[0]['layoutMode'], onLayout = vi.fn()) => {
+describe('view buttons in the tab bar', () => {
+  const render = (viewMode: Parameters<typeof TabBar>[0]['viewMode'], onViewMode = vi.fn()) => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
-    act(() => root.render(<TabBar workspaces={[ws('a')]} activeId="a" onSelect={vi.fn()} onReorder={vi.fn()} onContextMenu={vi.fn()} onNew={vi.fn()} onClose={vi.fn()} startOpen={false} onSelectStart={vi.fn()} onCloseStart={vi.fn()} layoutMode={layoutMode} onLayout={onLayout} />));
-    return { host, onLayout };
+    act(() => root.render(<TabBar workspaces={[ws('a')]} activeId="a" onSelect={vi.fn()} onReorder={vi.fn()} onContextMenu={vi.fn()} onNew={vi.fn()} onClose={vi.fn()} startOpen={false} onSelectStart={vi.fn()} onCloseStart={vi.fn()} viewMode={viewMode} onViewMode={onViewMode} />));
+    return { host, onViewMode };
   };
 
-  it('shows five buttons with tooltips, marks only the active preset and reports clicks', () => {
-    const { host, onLayout } = render('split-50-50');
+  it('shows exactly three buttons with tooltips, marks only the current view and reports clicks', () => {
+    const { host, onViewMode } = render('split');
     const btns = Array.from(host.querySelectorAll<HTMLButtonElement>('.layout-btn'));
-    expect(btns.map((b) => b.title)).toEqual(['Terminal only', 'GPT 20 / Terminal 80', 'GPT 50 / Terminal 50', 'GPT 80 / Terminal 20', 'GPT only']);
-    expect(btns.map((b) => b.classList.contains('selected'))).toEqual([false, false, true, false, false]);
-    act(() => btns[3]!.click());
-    expect(onLayout).toHaveBeenCalledWith('split-80-20');
+    expect(btns.map((b) => b.title)).toEqual(['ChatGPT Focus', 'Split View', 'Claude Focus']);
+    expect(btns.map((b) => b.classList.contains('selected'))).toEqual([false, true, false]);
+    act(() => btns[2]!.click());
+    expect(onViewMode).toHaveBeenCalledWith('claude-focus');
+    act(() => btns[0]!.click());
+    expect(onViewMode).toHaveBeenCalledWith('chatgpt-focus');
   });
 
-  it('selects no preset for a custom split and renders nothing without an active Workspace', () => {
-    expect(render('custom').host.querySelectorAll('.layout-btn.selected')).toHaveLength(0);
+  it('has no preset, Grid or Overview controls, and renders nothing without an active Workspace', () => {
+    const { host } = render('chatgpt-focus');
+    const labels = Array.from(host.querySelectorAll('button')).map((b) => b.getAttribute('aria-label') ?? b.textContent ?? '');
+    expect(labels.some((l) => /GPT \d|Terminal only|GPT only|Grid|Overview/.test(l))).toBe(false);
     expect(render(null).host.querySelector('.layout-presets')).toBeNull();
   });
 });
@@ -251,7 +255,7 @@ describe('workspace tabs', () => {
     const onContextMenu = vi.fn();
     const onClose = vi.fn();
     const list = [ws('a', { iconUrl: 'data:image/png;base64,AAAA' }), ws('b')];
-    act(() => root.render(<TabBar workspaces={list} activeId="a" onSelect={vi.fn()} onReorder={vi.fn()} onContextMenu={onContextMenu} onNew={vi.fn()} onClose={onClose} startOpen={false} onSelectStart={vi.fn()} onCloseStart={vi.fn()} layoutMode={null} onLayout={vi.fn()} />));
+    act(() => root.render(<TabBar workspaces={list} activeId="a" onSelect={vi.fn()} onReorder={vi.fn()} onContextMenu={onContextMenu} onNew={vi.fn()} onClose={onClose} startOpen={false} onSelectStart={vi.fn()} onCloseStart={vi.fn()} viewMode={null} onViewMode={vi.fn()} />));
     const [a, b] = Array.from(host.querySelectorAll('.tab'));
     expect(a!.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AAAA');
     expect(a!.querySelector('.tab-dot')).toBeNull();

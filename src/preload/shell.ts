@@ -67,7 +67,7 @@ contextBridge.exposeInMainWorld('workspace', {
   openSetupLink: (key: string) => ipcRenderer.invoke('app:open-setup-link', str(key)),
   requestMicrophone: () => ipcRenderer.invoke('app:request-microphone'),
   setSplit: (id: string, ratio: number, commit: boolean) => ipcRenderer.send('layout:set-split', { workspaceId: str(id), ratio: Number(ratio), commit: commit === true }),
-  setLayoutMode: (id: string, mode: string) => ipcRenderer.send('layout:set-mode', { workspaceId: str(id), mode: str(mode) }),
+  setViewMode: (id: string, mode: string) => ipcRenderer.send('layout:set-view', { workspaceId: str(id), mode: str(mode) }),
 
   diagnostics: {
     state: () => ipcRenderer.invoke('diag:state'),

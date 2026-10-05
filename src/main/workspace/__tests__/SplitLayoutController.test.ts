@@ -1,18 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SPLIT_RATIO, computeSplitGeometry, type LayoutMode, type Rect } from '../../../domain/layout/splitPane';
+import { DEFAULT_SPLIT_RATIO, computeSplitGeometry, type Rect } from '../../../domain/layout/splitPane';
+import { STATUS_BAR_HEIGHT, type ViewMode } from '../../../domain/layout/viewMode';
 import { SplitLayoutController, type SplitRatioStore } from '../SplitLayoutController';
 
 /** In-memory ratio store (the shell persists through AppStateStore). */
-function memoryStore(): SplitRatioStore & { saved: Map<string, number>; modes: Map<string, LayoutMode> } {
+function memoryStore(): SplitRatioStore & { saved: Map<string, number>; modes: Map<string, ViewMode> } {
   const saved = new Map<string, number>();
-  const modes = new Map<string, LayoutMode>();
+  const modes = new Map<string, ViewMode>();
   return {
     saved,
     modes,
     getSplitRatio: (id) => saved.get(id) ?? DEFAULT_SPLIT_RATIO,
     setSplitRatio: (id, r) => void saved.set(id, r),
-    getLayoutMode: (id) => modes.get(id) ?? 'custom',
-    setLayoutMode: (id, m) => void modes.set(id, m),
+    getViewMode: (id) => modes.get(id) ?? 'split',
+    setViewMode: (id, m) => void modes.set(id, m),
   };
 }
 
@@ -118,99 +119,120 @@ describe('SplitLayoutController', () => {
     expect(() => c.activate('nope')).toThrow();
   });
 
-  describe('layout presets', () => {
-    const chatWidth = (v: ReturnType<typeof fakeView>) => v.setBounds.mock.calls.at(-1)![0].width;
-    const usable = () => area.width - 6;
+  describe('views (ChatGPT Focus / Split / Claude Focus)', () => {
+    const noRuntimeTouch = (v: ReturnType<typeof fakeView>) => {
+      expect(v.webContents.loadURL).not.toHaveBeenCalled();
+      expect(v.webContents.reload).not.toHaveBeenCalled();
+      expect(v.webContents.close).not.toHaveBeenCalled();
+    };
 
-    it('each preset maps to its layout; hidden modes only toggle visibility', () => {
+    it('Split shows ChatGPT at the Workspace ratio', () => {
       const c = make();
       const a = fakeView();
       c.register('a', a);
       c.activate('a');
-      area = { x: 0, y: 0, width: 2406, height: 900 };
-      c.setMode('split-20-80');
-      expect(chatWidth(a)).toBe(Math.round(usable() * 0.2));
-      c.setMode('split-50-50');
-      expect(chatWidth(a)).toBe(Math.round(usable() * 0.5));
-      c.setMode('split-80-20');
-      expect(chatWidth(a)).toBe(Math.round(usable() * 0.8));
-      c.setMode('terminal-hidden');
-      expect(a.setBounds.mock.calls.at(-1)![0]).toEqual(area);
+      expect(c.activeViewMode).toBe('split');
+      expect(a.setBounds.mock.calls.at(-1)![0]).toEqual(computeSplitGeometry(area, DEFAULT_SPLIT_RATIO).chatgpt);
+      expect(a.setVisible).toHaveBeenLastCalledWith(true);
+    });
+
+    it('ChatGPT Focus fills the area above the status bar; Claude Focus hides ChatGPT without touching its bounds', () => {
+      const c = make();
+      const a = fakeView();
+      c.register('a', a);
+      c.activate('a');
+      c.setViewMode('chatgpt-focus');
+      expect(a.setBounds.mock.calls.at(-1)![0]).toEqual({ ...area, height: area.height - STATUS_BAR_HEIGHT });
       expect(a.setVisible).toHaveBeenLastCalledWith(true);
       a.setBounds.mockClear();
-      c.setMode('gpt-hidden');
+      c.setViewMode('claude-focus');
       expect(a.setVisible).toHaveBeenLastCalledWith(false);
+      c.relayout();
       expect(a.setBounds).not.toHaveBeenCalled();
-      c.setMode('split-50-50');
+      c.setViewMode('split');
       expect(a.setVisible).toHaveBeenLastCalledWith(true);
-      expect(a.webContents.loadURL).not.toHaveBeenCalled();
-      expect(a.webContents.reload).not.toHaveBeenCalled();
-      expect(a.webContents.close).not.toHaveBeenCalled();
+      noRuntimeTouch(a);
     });
 
-    it('keeps a layout per workspace, across tab switches, restart and window moves', () => {
-      let c = make();
-      c.register('a', fakeView());
-      c.register('b', fakeView());
-      c.activate('a');
-      c.setMode('split-80-20');
-      c.activate('b');
-      c.setMode('split-50-50');
-      expect(c.activate('a') && c.activeMode).toBe('split-80-20');
-      expect(c.activate('b') && c.activeMode).toBe('split-50-50');
-      // "restart" and "moved to another window" both mean: a fresh controller registering from the same store.
-      c = make();
-      c.register('a', fakeView());
-      c.register('b', fakeView());
-      c.activate('a');
-      expect(c.activeMode).toBe('split-80-20');
-      c.activate('b');
-      expect(c.activeMode).toBe('split-50-50');
-    });
-
-    it('drag makes it custom (persisted); a preset click leaves custom again', () => {
-      const c = make();
-      c.register('a', fakeView());
-      c.activate('a');
-      c.setMode('split-50-50');
-      c.preview(0.4);
-      expect(c.activeMode).toBe('custom');
-      c.commit(0.45);
-      expect(store.modes.get('a')).toBe('custom');
-      expect(store.saved.get('a')).toBeCloseTo(0.45);
-      c.setMode('split-80-20');
-      expect(store.modes.get('a')).toBe('split-80-20');
-      expect(store.saved.get('a')).toBeCloseTo(0.45);
-    });
-
-    it('presets reflow by ratio on window resize and hidden modes stay hidden', () => {
+    it('Split -> ChatGPT Focus -> Claude Focus -> Split restores the manual ratio and never rewrites it', () => {
+      area = { ...area, width: 2400 };
       const c = make();
       const a = fakeView();
       c.register('a', a);
       c.activate('a');
-      c.setMode('split-50-50');
-      area = { ...area, width: 1806 };
-      c.relayout();
-      expect(chatWidth(a)).toBe(900);
-      c.setMode('gpt-hidden');
-      area = { ...area, width: 1206 };
-      a.setVisible.mockClear();
-      c.relayout();
-      expect(a.setVisible).not.toHaveBeenCalled();
-      expect(a.setVisible).not.toHaveBeenCalledWith(true);
+      c.commit(0.72);
+      const saved = store.saved.get('a');
+      c.setViewMode('chatgpt-focus');
+      c.preview(0.3); // no divider outside Split: ignored
+      c.commit(0.3);
+      c.setViewMode('claude-focus');
+      c.commit(0.3);
+      c.setViewMode('split');
+      expect(store.saved.get('a')).toBe(saved);
+      expect(c.getActiveRatio()).toBeCloseTo(0.72);
+      expect(a.setBounds.mock.calls.at(-1)![0]).toEqual(computeSplitGeometry(area, 0.72).chatgpt);
+      noRuntimeTouch(a);
     });
 
-    it('relay geometry is only reported while a divider exists', () => {
-      const geo = vi.fn();
-      const c = new SplitLayoutController(store, () => area, geo);
+    it('each Workspace keeps its own view and ratio; switching tabs restores them', () => {
+      area = { ...area, width: 2400 };
+      const c = make();
+      const a = fakeView();
+      const b = fakeView();
+      const d = fakeView();
+      c.register('a', a);
+      c.register('b', b);
+      c.register('c', d);
+      c.activate('a');
+      c.setViewMode('chatgpt-focus');
+      c.activate('b');
+      c.setViewMode('claude-focus');
+      c.activate('c');
+      c.commit(0.4);
+      c.activate('a');
+      expect(c.activeViewMode).toBe('chatgpt-focus');
+      expect(a.setVisible).toHaveBeenLastCalledWith(true);
+      expect(b.setVisible).toHaveBeenLastCalledWith(false);
+      c.activate('b');
+      expect(c.activeViewMode).toBe('claude-focus');
+      expect(b.setVisible).toHaveBeenLastCalledWith(false); // its ChatGPT is hidden in Claude Focus
+      c.activate('c');
+      expect(c.getActiveRatio()).toBeCloseTo(0.4);
+      expect(store.modes.get('a')).toBe('chatgpt-focus');
+      expect(store.modes.get('b')).toBe('claude-focus');
+      [a, b, d].forEach(noRuntimeTouch);
+    });
+
+    it('the views are restored from the store on register (restart)', () => {
+      store.modes.set('a', 'claude-focus');
+      const c = make();
+      const a = fakeView();
+      c.register('a', a);
+      c.activate('a');
+      expect(c.activeViewMode).toBe('claude-focus');
+      expect(a.setVisible).toHaveBeenLastCalledWith(false);
+    });
+
+    it('the relay buttons only exist on the Split divider', () => {
+      const seen: unknown[] = [];
+      const c = new SplitLayoutController(store, () => area, (g) => seen.push(g));
       c.register('a', fakeView());
       c.activate('a');
-      c.setMode('split-50-50');
-      expect(geo.mock.calls.at(-1)![0]).not.toBeNull();
-      c.setMode('gpt-hidden');
-      expect(geo.mock.calls.at(-1)![0]).toBeNull();
-      c.setMode('terminal-hidden');
-      expect(geo.mock.calls.at(-1)![0]).toBeNull();
+      expect(seen.at(-1)).not.toBeNull();
+      c.setViewMode('chatgpt-focus');
+      expect(seen.at(-1)).toBeNull();
+      c.setViewMode('claude-focus');
+      expect(seen.at(-1)).toBeNull();
+      c.setViewMode('split');
+      expect(seen.at(-1)).not.toBeNull();
+    });
+
+    it('rejects an unknown view', () => {
+      const c = make();
+      c.register('a', fakeView());
+      c.activate('a');
+      expect(() => c.setViewMode('grid' as never)).toThrow();
+      expect(() => c.setViewMode('overview' as never)).toThrow();
     });
   });
 });

@@ -413,6 +413,54 @@ describe('WorkspaceOrchestrator', () => {
     });
   });
 
+  describe('one task lifecycle for every view (ChatGPT Focus / Split / Claude Focus)', () => {
+    it.each(['chatgpt-focus', 'split', 'claude-focus'] as const)('Send to Claude works while Workspace A is in %s', async (mode) => {
+      store.setViewMode('a', mode);
+      const req = await startTask('a');
+      expect(runs).toHaveLength(1);
+      expect(req.prompt).toBe('Prompt for A');
+      expect(orch.view('a')!.viewMode).toBe(mode);
+      expect(orch.view('a')!.task!.status).toBe('running');
+    });
+
+    it('switching views mid-run keeps the same single task running; completion and handback are unaffected', async () => {
+      store.setViewMode('a', 'chatgpt-focus');
+      const req = await startTask('a');
+      const taskId = orch.view('a')!.task!.id;
+      for (const mode of ['split', 'claude-focus', 'chatgpt-focus', 'split'] as const) {
+        store.setViewMode('a', mode);
+        const v = orch.view('a')!;
+        expect(v.task!.id).toBe(taskId);
+        expect(v.task!.status).toBe('running');
+      }
+      expect(runs).toHaveLength(1);
+      expect(cancels).toBe(0);
+      store.setViewMode('a', 'claude-focus');
+      complete(req, 'Built it');
+      await flush();
+      expect(orch.view('a')!.latestReview!.taskId).toBe(taskId);
+      expect(chats.a!.submitComposer).not.toHaveBeenCalled(); // never automatic
+      store.setViewMode('a', 'chatgpt-focus');
+      expect((await orch.sendReview('a', taskId)).ok).toBe(true);
+      expect(chats.a!.submitted).toBe(1);
+      expect(chats.b!.submitted).toBe(0);
+    });
+
+    it('views and task state are per Workspace: A running in ChatGPT Focus, B in Claude Focus stays idle, then completes alone', async () => {
+      store.setViewMode('a', 'chatgpt-focus');
+      store.setViewMode('b', 'claude-focus');
+      const reqA = await startTask('a');
+      expect(orch.view('a')!.task!.status).toBe('running');
+      expect(orch.view('b')!.task).toBeNull();
+      expect([orch.view('a')!.viewMode, orch.view('b')!.viewMode]).toEqual(['chatgpt-focus', 'claude-focus']);
+      complete(reqA);
+      await flush();
+      expect(orch.view('a')!.latestReview).not.toBeNull();
+      expect(orch.view('b')!.latestReview).toBeNull();
+      expect(orch.view('b')!.task).toBeNull();
+    });
+  });
+
   it('reset session is refused while running and clears only this Workspace session', async () => {
     const req = await startTask('b');
     expect(orch.resetSession('b').ok).toBe(false);

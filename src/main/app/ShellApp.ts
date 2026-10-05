@@ -22,7 +22,8 @@ import { basename, isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as nodePty from 'node-pty';
 import { autoUpdater } from 'electron-updater';
-import { DEFAULT_SPLIT_RATIO, isLayoutMode, isValidSplitRatio, type SplitGeometry } from '../../domain/layout/splitPane';
+import { DEFAULT_SPLIT_RATIO, isValidSplitRatio, type SplitGeometry } from '../../domain/layout/splitPane';
+import { isViewMode } from '../../domain/layout/viewMode';
 import { isEffortChoice, isModelChoice, parseDefaultModel, type ModelChoice } from '../../shared/models';
 import { colorForName, initialFor, isOpen, validateWorkspaceName, type WorkspaceRecord } from '../../domain/workspace/workspace';
 import type { AppSettings, ProjectSettings, SettingsTarget } from '../../shared/settings';
@@ -905,11 +906,11 @@ export async function startShell(): Promise<{ focusMainWindow: () => void }> {
     } else sw.layout.preview(ratio);
   });
 
-  // Preset buttons: always act on the sending window's active Workspace; persisted per Workspace.
-  onIn('layout:set-mode', (sw, arg) => {
+  // View buttons (ChatGPT Focus / Split / Claude Focus): act on the sending window's active Workspace; persisted per Workspace.
+  onIn('layout:set-view', (sw, arg) => {
     const { workspaceId, mode } = (arg ?? {}) as { workspaceId?: unknown; mode?: unknown };
-    if (!known(workspaceId) || workspaceId !== sw.layout.activeWorkspaceId || !isLayoutMode(mode)) return;
-    sw.layout.setMode(mode);
+    if (!known(workspaceId) || workspaceId !== sw.layout.activeWorkspaceId || !isViewMode(mode)) return;
+    sw.layout.setViewMode(mode);
     broadcast();
   });
 

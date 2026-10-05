@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { computeLayoutGeometry, computeSplitGeometry, isGptHidden, isTerminalHidden, ratioFromPointer } from '../../domain/layout/splitPane';
+import { ratioFromPointer } from '../../domain/layout/splitPane';
+import { computeViewGeometry } from '../../domain/layout/viewMode';
 import { workAreaFor } from '../../shared/shellLayout';
 import type { SettingsTarget } from '../../shared/settings';
 import type { ShellState, ToastMessage } from '../../shared/state';
 import type { WorkspaceApi } from './api';
+import { ClaudeStatusBar } from './components/ClaudeStatusBar';
 import { DevPane, type DevPaneActions } from './components/DevPane';
 import { AppSettings } from './components/AppSettings';
 import { CoffeeDialog } from './components/CoffeeDialog';
@@ -183,12 +185,9 @@ export function App({ api }: { api: WorkspaceApi }) {
   const area = workAreaFor(size.w, size.h);
   const ratio = dragRatio ?? active?.splitRatio ?? 0.6;
   // Dragging the divider turns the layout custom immediately (main persists it on release).
-  const layoutMode = dragRatio !== null ? 'custom' : (active?.layoutMode ?? 'custom');
-  const geo = computeLayoutGeometry(area, layoutMode, ratio);
-  const gptHidden = isGptHidden(layoutMode);
-  const terminalHidden = isTerminalHidden(layoutMode);
-  // A hidden terminal keeps a real size (offscreen-free, just invisible) so xterm/PTY never reflow to ~0 columns.
-  const devFrame = terminalHidden ? computeSplitGeometry(area, ratio).devPane : geo.devPane;
+  const viewMode = active?.viewMode ?? 'split';
+  const view = computeViewGeometry(area, viewMode, ratio);
+  const devFrame = view.devPane;
   const dragging = useRef(false);
   const frame = useRef(0);
   const latest = useRef(ratio);
@@ -254,8 +253,8 @@ export function App({ api }: { api: WorkspaceApi }) {
           setShowStart(true);
         }}
         onCloseStart={() => setShowStart(false)}
-        layoutMode={!settings && active ? layoutMode : null}
-        onLayout={(mode) => active && api.setLayoutMode(active.id, mode)}
+        viewMode={!settings && active ? viewMode : null}
+        onViewMode={(mode) => active && api.setViewMode(active.id, mode)}
       />
 
       {settings ? (
@@ -268,30 +267,42 @@ export function App({ api }: { api: WorkspaceApi }) {
         </div>
       ) : active ? (
         <>
-          {!gptHidden && (
-          <div className="chat-placeholder" style={{ left: geo.chatgpt.x, top: geo.chatgpt.y, width: geo.chatgpt.width, height: geo.chatgpt.height }}>
-            Loading ChatGPT…
-          </div>
+          {view.chatgpt && (
+            <div className="chat-placeholder" style={{ left: view.chatgpt.x, top: view.chatgpt.y, width: view.chatgpt.width, height: view.chatgpt.height }}>
+              Loading ChatGPT…
+            </div>
           )}
-          {!gptHidden && !terminalHidden && (
-          <div
-            className="splitter"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize ChatGPT and development panes"
-            style={{ left: geo.splitter.x, top: geo.splitter.y, width: geo.splitter.width, height: geo.splitter.height }}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
-          />
+          {view.splitter && (
+            <div
+              className="splitter"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize ChatGPT and development panes"
+              style={{ left: view.splitter.x, top: view.splitter.y, width: view.splitter.width, height: view.splitter.height }}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+            />
           )}
           <div
             className="devpane-frame"
-            style={{ left: devFrame.x, top: devFrame.y, width: devFrame.width, height: devFrame.height, ...(terminalHidden ? { visibility: 'hidden', pointerEvents: 'none' } : {}) }}
+            style={{ left: devFrame.x, top: devFrame.y, width: devFrame.width, height: devFrame.height, ...(view.devPaneVisible ? {} : { visibility: 'hidden', pointerEvents: 'none' }) }}
           >
             <DevPane workspaces={state.workspaces} active={active} debugMode={state.debugMode} actions={actions} diagnostics={api.diagnostics} />
           </div>
+          {view.statusBar && (
+            <ClaudeStatusBar
+              active={active}
+              busy={busy}
+              style={{ left: view.statusBar.x, top: view.statusBar.y, width: view.statusBar.width, height: view.statusBar.height }}
+              onSend={() => void actions.sendToClaude(active.id)}
+              onSendReview={() => active.latestReview && actions.sendReview(active.id, active.latestReview.taskId)}
+              onStop={() => actions.cancelTask(active.id)}
+              onCancelAutoSend={() => actions.cancelAutoSend(active.id)}
+              onOpenClaude={() => api.setViewMode(active.id, 'claude-focus')}
+            />
+          )}
         </>
       ) : (
         <div className="start-frame" style={{ left: area.x, top: area.y }}>

@@ -1,4 +1,4 @@
-import type { LayoutMode } from '../../domain/layout/splitPane';
+import type { ViewMode } from '../../domain/layout/viewMode';
 import type { AppSettings, AppSettingsPatch, ProjectSettings, ProjectSettingsPatch, SettingsTarget } from '../../shared/settings';
 import type { BlockInfo, CopyKind, CopyTarget } from '../../shared/response';
 import type { MicrophoneStatus, SetupCheck, SetupLink } from '../../shared/setup';
@@ -46,7 +46,8 @@ export interface WorkspaceApi {
   terminalResize(id: string, cols: number, rows: number): void;
   terminalRestart(id: string): Promise<void>;
   setSplit(id: string, ratio: number, commit: boolean): void;
-  setLayoutMode(id: string, mode: LayoutMode): void;
+  /** ChatGPT Focus / Split / Claude Focus for a Workspace (visibility only). */
+  setViewMode(id: string, mode: ViewMode): void;
   /** State of the round relay buttons drawn by the divider overlay. */
   setRelayState(state: RelayState): void;
   /** Opens the Buy Me a Coffee page in the default browser. */

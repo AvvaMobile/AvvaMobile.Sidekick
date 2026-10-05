@@ -5,9 +5,7 @@ import {
   MIN_DEV_PANE_WIDTH,
   SPLITTER_WIDTH,
   clampSplitRatio,
-  computeLayoutGeometry,
   computeSplitGeometry,
-  isLayoutMode,
   isValidSplitRatio,
   ratioFromPointer,
 } from '../splitPane';
@@ -50,21 +48,5 @@ describe('split pane geometry', () => {
     expect(ratioFromPointer(600 + SPLITTER_WIDTH / 2, w)).toBeCloseTo(0.5);
     expect(ratioFromPointer(0, w)).toBeCloseTo(MIN_CHATGPT_WIDTH / (w - SPLITTER_WIDTH));
     expect(ratioFromPointer(w, w)).toBeCloseTo(1 - MIN_DEV_PANE_WIDTH / (w - SPLITTER_WIDTH));
-  });
-
-  it('layout modes: presets are ratios, hidden panes get zero width, minimums still apply', () => {
-    const a = area(2006);
-    expect(computeLayoutGeometry(a, 'split-50-50', 0.3).chatgpt.width).toBe(1000);
-    expect(computeLayoutGeometry(a, 'custom', 0.3).chatgpt.width).toBe(Math.round(2000 * 0.3));
-    const gptHidden = computeLayoutGeometry(a, 'gpt-hidden', 0.3);
-    expect(gptHidden.chatgpt.width).toBe(0);
-    expect(gptHidden.devPane).toEqual(a);
-    const termHidden = computeLayoutGeometry(a, 'terminal-hidden', 0.3);
-    expect(termHidden.chatgpt).toEqual(a);
-    expect(termHidden.devPane.width).toBe(0);
-    expect(computeLayoutGeometry(area(1206), 'split-20-80', 0.5).chatgpt.width).toBeGreaterThanOrEqual(MIN_CHATGPT_WIDTH);
-    expect(computeLayoutGeometry(area(1206), 'split-80-20', 0.5).devPane.width).toBeGreaterThanOrEqual(MIN_DEV_PANE_WIDTH);
-    expect(isLayoutMode('split-50-50')).toBe(true);
-    expect(isLayoutMode('nope')).toBe(false);
   });
 });

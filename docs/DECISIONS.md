@@ -185,7 +185,7 @@ M0 regression: the spike's right panel received every ChatGPT navigation/permiss
 ## D023 - Resizable split, persisted per Workspace
 
 Decision:
-A draggable vertical splitter separates the ChatGPT and development columns. Minimum widths: ChatGPT 360 px, development pane 320 px, splitter 6 px. The split ratio is stored per Workspace (`WorkspaceUiState.splitRatio`) and restored when that Workspace is selected. Five layout presets (Terminal only, GPT 20/80, 50/50, 80/20, GPT only) sit at the right end of the tab strip and act on the window's active Workspace; the mode is stored per Workspace (`WorkspaceUiState.layoutMode`, absent in older records = `custom`, so saved ratios keep working). Presets are ratios clamped to the minimum widths; dragging the splitter switches the Workspace to `custom`. Hidden panes are only hidden (ChatGPT view `setVisible(false)`, terminal frame `visibility:hidden` at its normal size), never destroyed or resized to zero.
+A draggable vertical splitter separates the ChatGPT and development columns. Minimum widths: ChatGPT 360 px, development pane 320 px, splitter 6 px. The split ratio is stored per Workspace (`WorkspaceUiState.splitRatio`) and restored when that Workspace is selected. The five layout presets that once sat next to the tabs were replaced by three views in D043. Hidden panes are only hidden (ChatGPT view `setVisible(false)`, terminal frame `visibility:hidden` at its normal size), never destroyed or resized to zero.
 
 Geometry is computed by one pure module (`src/domain/layout/splitPane.ts`) used by both the renderer and the main process. During a drag the renderer updates its own layout immediately and sends at most one fire-and-forget ratio update per animation frame; the main process only calls `setBounds` on the existing ChatGPT WebContentsView. The ratio is persisted on drag end only.
 
@@ -351,3 +351,15 @@ Current authentication mechanism (temporary): `GH_TOKEN`, then `GITHUB_TOKEN`, t
 
 Reason:
 Syntactic validity proves nothing about access, and permissions change. Reusing an existing login avoids new auth architecture until a real connection flow is designed.
+
+## D043 - Three views per Workspace: ChatGPT Focus, Split, Claude Focus
+
+Decision:
+The handoff (ChatGPT plans -> Send to Claude -> Claude works -> result -> optional Send to ChatGPT) is one per-Workspace task lifecycle that does not know about layout. A Workspace's view only decides what is visible (`SplitLayoutController`, pure geometry in `src/domain/layout/viewMode.ts`, shared with the renderer):
+- ChatGPT Focus: ChatGPT fills the work area above a slim Claude bar (Idle / Running + Stop / Result ready + Send to ChatGPT, Send to Claude, Open Claude -> Claude Focus, the auto-send countdown). The terminal frame is hidden at its normal size; the PTY and Claude keep running.
+- Split: ChatGPT | terminal with the free draggable splitter and the Workspace's saved ratio; the relay buttons sit on the divider.
+- Claude Focus: the terminal fills the work area; the ChatGPT view is only hidden.
+Switching views only calls `setBounds`/`setVisible`; nothing is recreated and no task, session, prompt or terminal buffer changes. The split ratio is written only by the divider, so Focus views never overwrite it.
+The view is stored per Workspace as the optional `uiState.viewMode` (`chatgpt-focus` | `split` | `claude-focus`); default Split. The removed presets are migrated when read: `uiState.layoutMode` `terminal-hidden` -> ChatGPT Focus, `gpt-hidden` -> Claude Focus, anything else Split; `split-20-80` / `split-50-50` / `split-80-20` continue as that ratio. `layoutMode` is never deleted, and when the divider is dragged it is set to `custom`, so master (which ignores `viewMode`) shows the same ratio after a rollback.
+Limits: the ChatGPT Focus bar takes 34 px of height; Claude Focus has no Send to ChatGPT button (the tab badge shows a ready result).
+

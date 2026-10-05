@@ -520,7 +520,7 @@ export class WorkspaceOrchestrator {
       model: ws.model ?? this.deps.defaultModel?.() ?? null,
       effort: ws.effort ?? null,
       splitRatio: this.deps.store.getSplitRatio(ws.id),
-      layoutMode: this.deps.store.getLayoutMode(ws.id),
+      viewMode: this.deps.store.getViewMode(ws.id),
       attention: rt.attention,
       chatgpt: { generating: rt.generating, loggedIn: rt.loggedIn },
       candidate: cand

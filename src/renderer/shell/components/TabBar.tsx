@@ -1,19 +1,17 @@
 import { useRef, useState } from 'react';
-import { PRESET_MODES, type LayoutMode } from '../../../domain/layout/splitPane';
+import { VIEW_MODES, type ViewMode } from '../../../domain/layout/viewMode';
 import type { WorkspaceView } from '../../../shared/state';
 
-const PRESET_TITLES: Record<(typeof PRESET_MODES)[number], string> = {
-  'gpt-hidden': 'Terminal only',
-  'split-20-80': 'GPT 20 / Terminal 80',
-  'split-50-50': 'GPT 50 / Terminal 50',
-  'split-80-20': 'GPT 80 / Terminal 20',
-  'terminal-hidden': 'GPT only',
+const VIEW_TITLES: Record<ViewMode, string> = {
+  'chatgpt-focus': 'ChatGPT Focus',
+  split: 'Split View',
+  'claude-focus': 'Claude Focus',
 };
 
 /** Left-pane share drawn in the icon (ChatGPT left, terminal right). */
-const ICON_SPLIT: Record<(typeof PRESET_MODES)[number], number> = { 'gpt-hidden': 0, 'split-20-80': 0.2, 'split-50-50': 0.5, 'split-80-20': 0.8, 'terminal-hidden': 1 };
+const ICON_SPLIT: Record<ViewMode, number> = { 'chatgpt-focus': 1, split: 0.5, 'claude-focus': 0 };
 
-function LayoutIcon({ mode }: { mode: (typeof PRESET_MODES)[number] }) {
+function LayoutIcon({ mode }: { mode: ViewMode }) {
   // A tiny window: the two panes fill it edge to edge (no inner padding).
   const body = 16;
   const left = Math.round(body * ICON_SPLIT[mode]);
@@ -48,9 +46,9 @@ interface Props {
   startOpen: boolean;
   onSelectStart(): void;
   onCloseStart(): void;
-  /** Layout of the active Workspace; null hides the preset buttons (start page, settings). */
-  layoutMode: LayoutMode | null;
-  onLayout(mode: LayoutMode): void;
+  /** View of the active Workspace; null hides the view buttons (start page, settings). */
+  viewMode: ViewMode | null;
+  onViewMode(mode: ViewMode): void;
 }
 
 function stateOf(ws: WorkspaceView): { cls: string; title: string } {
@@ -92,7 +90,7 @@ export function shiftFor(index: number, from: number, to: number, slot: number):
  * Browser-style project tab strip (replaces the Slack-style sidebar, D016). Tabs are reordered by
  * dragging: the other tabs slide out of the way (animated), the dragged tab settles on release.
  */
-export function TabBar({ workspaces, activeId, onSelect, onReorder, onContextMenu, onNew, onClose, startOpen, onSelectStart, onCloseStart, layoutMode, onLayout }: Props) {
+export function TabBar({ workspaces, activeId, onSelect, onReorder, onContextMenu, onNew, onClose, startOpen, onSelectStart, onCloseStart, viewMode, onViewMode }: Props) {
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const update = (d: Drag | null) => {
@@ -202,10 +200,10 @@ export function TabBar({ workspaces, activeId, onSelect, onReorder, onContextMen
           </button>
         </div>
       </nav>
-      {layoutMode && (
-        <div className="layout-presets" role="group" aria-label="Pane layout">
-          {PRESET_MODES.map((m) => (
-            <button key={m} className={`layout-btn ${layoutMode === m ? 'selected' : ''}`} title={PRESET_TITLES[m]} aria-label={PRESET_TITLES[m]} aria-pressed={layoutMode === m} onClick={() => onLayout(m)}>
+      {viewMode && (
+        <div className="layout-presets" role="group" aria-label="View">
+          {VIEW_MODES.map((m) => (
+            <button key={m} className={`layout-btn ${viewMode === m ? 'selected' : ''}`} title={VIEW_TITLES[m]} aria-label={VIEW_TITLES[m]} aria-pressed={viewMode === m} onClick={() => onViewMode(m)}>
               <LayoutIcon mode={m} />
             </button>
           ))}

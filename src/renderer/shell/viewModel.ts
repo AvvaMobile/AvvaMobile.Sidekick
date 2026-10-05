@@ -52,3 +52,13 @@ export function relayState(ws: WorkspaceView | null, busy: boolean): RelayState 
       : { enabled: false, title: 'Send to ChatGPT — available when Claude finishes' },
   };
 }
+
+export type ClaudeStatus = 'idle' | 'running' | 'result-ready' | 'failed';
+
+/** Compact Claude state of a Workspace for the ChatGPT Focus status bar. */
+export function claudeStatus(ws: WorkspaceView): ClaudeStatus {
+  const task = ws.task;
+  if (task?.status === 'queued' || task?.status === 'running') return 'running';
+  if (ws.latestReview) return task?.id === ws.latestReview.taskId && task.outcome === 'failed' ? 'failed' : 'result-ready';
+  return ws.attention === 'failed' ? 'failed' : 'idle';
+}

@@ -206,7 +206,7 @@ export function DevPane({ workspaces, active, debugMode, actions, diagnostics }:
 }
 
 /** Live countdown for the user-requested auto-send (D034). */
-function AutoSendBar({ at, onCancel }: { at: string; onCancel(): void }) {
+export function AutoSendBar({ at, onCancel, compact = false }: { at: string; onCancel(): void; compact?: boolean }) {
   const left = () => Math.max(0, Math.ceil((Date.parse(at) - Date.now()) / 1000));
   const [secs, setSecs] = useState(left);
   useEffect(() => {
@@ -215,7 +215,7 @@ function AutoSendBar({ at, onCancel }: { at: string; onCancel(): void }) {
     return () => clearInterval(t);
   }, [at]);
   return (
-    <div className="review-bar auto-send-bar" role="status">
+    <div className={`review-bar auto-send-bar ${compact ? 'compact' : ''}`} role="status">
       <span className="review-title">
         Sending to Claude in {secs} s <span className="auto-send-why">— you asked ChatGPT to send it</span>
       </span>

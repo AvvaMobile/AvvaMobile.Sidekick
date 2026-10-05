@@ -258,3 +258,14 @@ html.platform-win32 .shell.fullscreen .topbar { padding-right: 10px; }
 .layout-btn { width: 28px; height: 24px; display: grid; place-items: center; border: none; border-radius: 6px; background: transparent; color: var(--chrome-muted); cursor: pointer; }
 .layout-btn:hover { color: var(--chrome-text); background: #e8e8ea; }
 .layout-btn.selected { background: var(--chrome-topbar); color: var(--accent); box-shadow: 0 0 0 1px var(--chrome-border); }
+
+/* ChatGPT Focus: slim Claude status strip under the ChatGPT view. */
+.status-bar { position: absolute; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--pane); border-top: 1px solid var(--border); font-size: 12.5px; overflow: hidden; z-index: 3; }
+.status-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.status-dot.running { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.status-dot.result-ready { background: var(--ok); }
+.status-dot.failed { background: var(--err); }
+.status-label { white-space: nowrap; }
+.status-hint { color: var(--muted); white-space: nowrap; }
+.status-spacer { flex: 1; }
+.review-bar.compact { border: none; background: transparent; padding: 0; }
